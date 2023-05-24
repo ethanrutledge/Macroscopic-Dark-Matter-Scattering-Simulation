@@ -1,7 +1,7 @@
-# attempt 1 at program for simulating DM trajectory through target box
+# simulating DM trajectory through target box
 
 import numpy as np
-import uproot_methods as root
+import uproot_methods as urm
 
 # -------------------------DETECTOR GEOMETRY--------------------------------
 # unsure of actual dimensions of DUNE detector
@@ -36,7 +36,7 @@ r = r_max * np.sqrt(prob_r)
 
 # ----------------------TRAJECTORY CALCULATION--------------------------
 # initial disk orientation, fixed to z axis
-disk = root.TVector3(np.cos(alpha), np.sin(alpha), 0)
+disk = urm.TVector3(np.cos(alpha), np.sin(alpha), 0)
 
 # disk oriented by theta around y-axis then by phi around z-axis
 disk = disk.rotatey(theta)
@@ -49,44 +49,49 @@ disk = r * disk
 orient = [np.sqrt(1 - c ** 2) * np.cos(phi), np.sqrt(1 - c ** 2) * np.sin(phi), c]
 
 # ---------------------ENTRY AND EXIT POINTS---------------------------
-points = []
-lam = np.zeros(6)
+# to store solved trajectories at each plane
+faces = []
+lamdas = np.zeros(6)
+# to store trajectories that are either entry or exit points
+valid_points = []
+valid_lamdas = []
 
-# face 1 -> xy plane at z_max
-lam[0] = (z_max - disk.z)/orient[2]
-f1 = root.TVector3(lam[0] * orient[0] + disk.x, lam[0] * orient[1] + disk.y, z_max)
-if (f1[0] >= x_min & f1[0] <= x_max) & (f1[1] >= y_min & f1[1] <= y_max):
-    points.append(f1)
+# for each of the 6 faces: solve lamda using fixed axis point then subsequently solve trajectory equation
+# face 0 -> xy plane at z_max
+lamdas[0] = (z_max - disk.z) / orient[2]
+faces.append(urm.TVector3(lamdas[0] * orient[0] + disk.x, lamdas[0] * orient[1] + disk.y, z_max))
 
-# face 2 -> xy plane at z_min
-lam[1] = (z_min - disk.z)/orient[2]
-f2 = root.TVector3(lam[1] * orient[0] + disk.x, lam[1] * orient[1] + disk.y, z_min)
-if (f2[0] >= x_min & f2[0] <= x_max) & (f2[1] >= y_min & f2[1] <= y_max):
-    points.append(f2)
+# face 1 -> xy plane at z_min
+lamdas[1] = (z_min - disk.z) / orient[2]
+faces.append(urm.TVector3(lamdas[1] * orient[0] + disk.x, lamdas[1] * orient[1] + disk.y, z_min))
 
-# face 3 -> zy plane at x_max
-lam[2] = (x_max - disk.x)/orient[0]
-f3 = root.TVector3(x_max, lam[2] * orient[1] + disk.y, lam[2] * orient[2] + disk.z)
-if (f3[1] >= y_min & f3[1] <= y_max) & (f3[2] >= z_min & f3[2] <= z_max):
-    points.append(f3)
+# face 2 -> zy plane at x_max
+lamdas[2] = (x_max - disk.x) / orient[0]
+faces.append(urm.TVector3(x_max, lamdas[2] * orient[1] + disk.y, lamdas[2] * orient[2] + disk.z))
 
-# face 4 -> zy plane at x_min
-lam[3] = (x_min - disk.x)/orient[0]
-f4 = root.TVector3(x_min, lam[3] * orient[1] + disk.y, lam[3] * orient[2] + disk.z)
-if (f4[1] >= y_min & f4[1] <= y_max) & (f4[2] >= z_min & f4[2] <= z_max):
-    points.append(f4)
+# face 3 -> zy plane at x_min
+lamdas[3] = (x_min - disk.x) / orient[0]
+faces.append(urm.TVector3(x_min, lamdas[3] * orient[1] + disk.y, lamdas[3] * orient[2] + disk.z))
 
-# face 5 -> xz plane at y_max
-lam[4] = (y_max - disk.y)/orient[1]
-f5 = root.TVector3(lam * orient[0] + disk.x, y_max, lam[4] * orient[2] + disk.z)
-if(f5[0] >= x_min & f5[0] <= x_max) & (f5[2] >= z_min & f5[2] <= z_max):
-    points.append(f5)
+# face 4 -> xz plane at y_max
+lamdas[4] = (y_max - disk.y) / orient[1]
+faces.append(urm.TVector3(lamdas * orient[0] + disk.x, y_max, lamdas[4] * orient[2] + disk.z))
 
-# face 6 -> xz plane at y_min
-lam[5] = (y_min - disk.y)/orient[1]
-f6 = root.TVector3(lam * orient[0] + disk.x, y_min, lam[4] * orient[2] + disk.z)
-if(f6[0] >= x_min & f6[0] <= x_max) & (f6[2] >= z_min & f6[2] <= z_max):
-    points.append(f6)
+# face 5 -> xz plane at y_min
+lamdas[5] = (y_min - disk.y) / orient[1]
+faces.append(urm.TVector3(lamdas * orient[0] + disk.x, y_min, lamdas[4] * orient[2] + disk.z))
 
-if len(points) != 2:
-    print('Trajectory does not have valid entry and exit points')
+# check which (if any) points are valid points on the faces of the detector
+for i in range(6):
+    if (faces[i].x <= x_max & faces[i].x >= x_min) & (faces[i].y <= y_max & faces[i].y >= y_min) & (faces[i].z <= z_max & faces[i].z >= z_min):
+        valid_points.append(faces[i])
+        valid_lamdas.append(lamdas[i])
+
+# print out valid points and lamdas if found
+if len(valid_points) != 2:
+    print('Trajectory does not have valid entry and exit points on the detector')
+else:
+    print('Point 1: ', valid_points[0].__str__())
+    print('Lamda 1', valid_lamdas[0])
+    print('Point 2', valid_points[1].__str__())
+    print('Lamda 2', valid_lamdas[1])
