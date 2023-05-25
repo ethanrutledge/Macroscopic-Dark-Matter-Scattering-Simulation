@@ -8,7 +8,7 @@ import numpy as np
 
 # assuming single scattering mode
 # therefore only one cross-section
-cross_section = 10  # placeholder value
+cross_section = 10**-24  # placeholder value
 
 # ---------------------------PART 1-----------------------------------------
 # incoming beam particle and stationary target particle

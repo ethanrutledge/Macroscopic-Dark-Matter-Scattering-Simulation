@@ -5,13 +5,13 @@ import uproot_methods as urm
 
 # -------------------------DETECTOR GEOMETRY--------------------------------
 # unsure of actual dimensions of DUNE detector
-# temporarily using scale of 60m x 10m x 10m centered around the origin
-z_max = 5
-z_min = -5
-y_max = 5
-y_min = -5
-x_max = 30
-x_min = -30
+# temporarily using scale of 66m x 19m x 18m centered around the origin
+z_max = 19/2
+z_min = -19/2
+y_max = 9
+y_min = -9
+x_max = 33
+x_min = -33
 
 # r_max
 # must be large enough s.t. no matter disk orientation target is covered
@@ -37,11 +37,9 @@ r = r_max * np.sqrt(prob_r)
 # ----------------------TRAJECTORY CALCULATION--------------------------
 # initial disk orientation, fixed to z axis
 disk = urm.TVector3(np.cos(alpha), np.sin(alpha), 0)
-
 # disk oriented by theta around y-axis then by phi around z-axis
 disk = disk.rotatey(theta)
 disk = disk.rotatez(phi)
-
 # resize disk to radius
 disk = r * disk
 
@@ -75,15 +73,15 @@ faces.append(urm.TVector3(x_min, lamdas[3] * orient[1] + disk.y, lamdas[3] * ori
 
 # face 4 -> xz plane at y_max
 lamdas[4] = (y_max - disk.y) / orient[1]
-faces.append(urm.TVector3(lamdas * orient[0] + disk.x, y_max, lamdas[4] * orient[2] + disk.z))
+faces.append(urm.TVector3(lamdas[4] * orient[0] + disk.x, y_max, lamdas[4] * orient[2] + disk.z))
 
 # face 5 -> xz plane at y_min
 lamdas[5] = (y_min - disk.y) / orient[1]
-faces.append(urm.TVector3(lamdas * orient[0] + disk.x, y_min, lamdas[4] * orient[2] + disk.z))
+faces.append(urm.TVector3(lamdas[5] * orient[0] + disk.x, y_min, lamdas[4] * orient[2] + disk.z))
 
 # check which (if any) points are valid points on the faces of the detector
 for i in range(6):
-    if (faces[i].x <= x_max & faces[i].x >= x_min) & (faces[i].y <= y_max & faces[i].y >= y_min) & (faces[i].z <= z_max & faces[i].z >= z_min):
+    if (faces[i].x <= x_max) & (faces[i].x >= x_min) & (faces[i].y <= y_max) & (faces[i].y >= y_min) & (faces[i].z <= z_max) & (faces[i].z >= z_min):
         valid_points.append(faces[i])
         valid_lamdas.append(lamdas[i])
 

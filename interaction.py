@@ -7,7 +7,7 @@ import numpy as np
 # number density of target particles
 n = 10         # placeholder value
 
-cross_section = 10     # placeholder value
+cross_section = 10**-24     # placeholder value
 
 # will store sampled interaction points
 x_samples = []
