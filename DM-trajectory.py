@@ -22,6 +22,7 @@ z_min = -z_scale / 2
 # must be large enough s.t. no matter disk orientation target is covered
 r_max = np.sqrt((x_scale ** 2) + (y_scale ** 2) + (z_scale ** 2))/2
 
+# ---------------------SAMPLE TRAJECTORIES-----------------------------------
 # store found entry and exit points
 entries = []
 exits = []
@@ -103,7 +104,7 @@ for j in range(100000):
             valid_points.append(faces[i])
             valid_lambdas.append(lambdas[i])
 
-    # print out valid points and lambdas if found
+    # add valid points to entries and exit lists if found
     if len(valid_points) == 2:
         # check which is entry and exit
         if valid_lambdas[0] < valid_lambdas[1]:
@@ -112,6 +113,16 @@ for j in range(100000):
         else:
             entries.append(valid_points[1])
             exits.append(valid_points[0])
+
+    # ----------------------SAMPLE SPEED------------------------------------
+    v_bar = 10 ** -3
+    v_x = np.random.normal(0, v_bar/np.sqrt(3))
+    v_y = np.random.normal(0, v_bar/np.sqrt(3))
+    v_z = np.random.normal(0, v_bar/np.sqrt(3))
+
+    v = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
+
+    f_v = 3 * np.sqrt(6 / np.pi) * (1 / v_bar ** 3) * (v ** 2) * np.log((-3 * v ** 2) / (2 * v_bar ** 2))
 
 
 # -----------------------PLOT FUNCTIONS-----------------------------------
@@ -406,4 +417,4 @@ def costheta_phi_hist(cs, phis):
 # all_face_hex_dist_plot(exits, 'exit')
 # one_dim_hist_all_faces(entries, "entry")
 # one_dim_hist_all_faces(exits, "exit")
-costheta_phi_hist(cs, phis)
+# costheta_phi_hist(cs, phis)
