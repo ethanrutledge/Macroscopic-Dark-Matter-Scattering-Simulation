@@ -95,7 +95,7 @@ for j in range(100000):
 
     # face 5 -> xz plane at y_min
     lambdas[5] = (y_min - disk.y) / orient[1]
-    faces.append(urm.TVector3(lambdas[5] * orient[0] + disk.x, y_min, lambdas[4] * orient[2] + disk.z))
+    faces.append(urm.TVector3(lambdas[5] * orient[0] + disk.x, y_min, lambdas[5] * orient[2] + disk.z))
 
     # check which (if any) points are valid points on the faces of the detector
     for i in range(6):
@@ -122,7 +122,7 @@ for j in range(100000):
 
     v = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
 
-    f_v = 3 * np.sqrt(6 / np.pi) * (1 / v_bar ** 3) * (v ** 2) * np.log((-3 * v ** 2) / (2 * v_bar ** 2))
+    # f_v = 3 * np.sqrt(6 / np.pi) * (1 / v_bar ** 3) * (v ** 2) * np.log((-3 * v ** 2) / (2 * v_bar ** 2))
 
 
 # -----------------------PLOT FUNCTIONS-----------------------------------
@@ -415,6 +415,6 @@ def costheta_phi_hist(cs, phis):
 # rotating_plot(entries, exits)
 # all_face_hex_dist_plot(entries, 'entry')
 # all_face_hex_dist_plot(exits, 'exit')
-# one_dim_hist_all_faces(entries, "entry")
-# one_dim_hist_all_faces(exits, "exit")
+one_dim_hist_all_faces(entries, "entry")
+one_dim_hist_all_faces(exits, "exit")
 # costheta_phi_hist(cs, phis)
