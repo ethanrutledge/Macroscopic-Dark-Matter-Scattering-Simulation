@@ -11,6 +11,7 @@ x_scale = 12
 y_scale = 14
 z_scale = 58.2
 
+# calculate the points of each face based on scale
 x_max = x_scale / 2
 x_min = -x_scale / 2
 y_max = y_scale / 2
@@ -30,6 +31,9 @@ exits = []
 # store c and phis to check distribution
 cs = []
 phis = []
+
+# store velocity magnitude
+velocities = []
 
 # iterate for some number of samples of trajectories
 for j in range(100000):
@@ -113,16 +117,21 @@ for j in range(100000):
         else:
             entries.append(valid_points[1])
             exits.append(valid_points[0])
+    elif len(valid_points) == 1 or len(valid_points) > 2:
+        print('invalid number of trajectory entry/exit points')
 
     # ----------------------SAMPLE SPEED------------------------------------
+    # v_bar most likely needs refined
     v_bar = 10 ** -3
+
+    # each component sampled from a normal distribution with mean 0 and standard deviation v_bar/sqrt(3)
     v_x = np.random.normal(0, v_bar/np.sqrt(3))
     v_y = np.random.normal(0, v_bar/np.sqrt(3))
     v_z = np.random.normal(0, v_bar/np.sqrt(3))
 
+    # find magnitude of velocity
     v = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
-
-    # f_v = 3 * np.sqrt(6 / np.pi) * (1 / v_bar ** 3) * (v ** 2) * np.log((-3 * v ** 2) / (2 * v_bar ** 2))
+    velocities.append(v)
 
 
 # -----------------------PLOT FUNCTIONS-----------------------------------
@@ -133,6 +142,7 @@ def single_face_hex_dist_plot(points, face, point_type):
     :param point_type: string of either entry or exit
     :return: creates a 2d hexagonal distribution plot of entry or exit points on specific face
     """
+
     if 'z' in face:
         x_dist = []
         y_dist = []
@@ -409,12 +419,26 @@ def costheta_phi_hist(cs, phis):
     plt.savefig('cosThetaPhiDist')
 
 
+def velocities_hist(velocities):
+    """
+    :param velocities: list of all velocities sampled
+    :return: histogram of distribution
+    """
+
+    fig, ax = plt.subplots()
+    ax.hist(velocities, bins=15)
+    ax.set_title('velocity magnitudes')
+    ax.set_ylabel('frequency')
+    ax.set_xlabel('fraction of c')
+    plt.savefig('velocityMagnitudeDist')
+
 # ----------------------FUNCTION TEST CALLS------------------------
 # single_face_hex_dist_plot(exits, "y_min", "exit")
 # single_face_hex_dist_plot(entries, "z_max", "entry")
 # rotating_plot(entries, exits)
 # all_face_hex_dist_plot(entries, 'entry')
 # all_face_hex_dist_plot(exits, 'exit')
-one_dim_hist_all_faces(entries, "entry")
-one_dim_hist_all_faces(exits, "exit")
+# one_dim_hist_all_faces(entries, "entry")
+# one_dim_hist_all_faces(exits, "exit")
 # costheta_phi_hist(cs, phis)
+# velocities_hist(velocities)
