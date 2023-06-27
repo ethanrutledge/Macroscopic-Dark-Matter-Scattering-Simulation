@@ -33,7 +33,7 @@ cs = []
 phis = []
 
 # store velocity magnitude
-velocities = []
+speeds = []
 
 # iterate for some number of samples of trajectories
 for j in range(100000):
@@ -130,8 +130,8 @@ for j in range(100000):
     v_z = np.random.normal(0, v_bar/np.sqrt(3))
 
     # find magnitude of velocity
-    v = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
-    velocities.append(v)
+    s = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
+    speeds.append(s)
 
 
 # -----------------------PLOT FUNCTIONS-----------------------------------
@@ -419,14 +419,14 @@ def costheta_phi_hist(cs, phis):
     plt.savefig('cosThetaPhiDist')
 
 
-def velocities_hist(velocities):
+def speeds_hist(speeds):
     """
-    :param velocities: list of all velocities sampled
+    :param speeds: list of all velocities sampled
     :return: histogram of distribution
     """
 
     fig, ax = plt.subplots()
-    ax.hist(velocities, bins=15)
+    ax.hist(speeds, bins=15)
     ax.set_title('velocity magnitudes')
     ax.set_ylabel('frequency')
     ax.set_xlabel('fraction of c')
@@ -441,4 +441,4 @@ def velocities_hist(velocities):
 # one_dim_hist_all_faces(entries, "entry")
 # one_dim_hist_all_faces(exits, "exit")
 # costheta_phi_hist(cs, phis)
-# velocities_hist(velocities)
+# speeds_hist(speeds)
