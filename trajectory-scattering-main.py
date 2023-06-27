@@ -157,7 +157,9 @@ for j in range(100):
     # beam particle (dark matter)
     mass_DM = 10  # ------------------------placeholder value
     gamma = urm.TVector3(1 / np.sqrt(1 - velocity.x ** 2), 1 / np.sqrt(1 - velocity.y ** 2), 1 / np.sqrt(1 - velocity.z ** 2))
-    beam = urm.TLorentzVector(mass_DM, gamma.x * velocity.x, gamma.y * velocity.y, gamma.z * velocity.z)
+    p_beam = urm.TVector3(gamma.x * velocity.x, gamma.y * velocity.y, gamma.z * velocity.z)
+    p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
+    beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
 
     # ---------------------------PART 2---------------------------------------
     # apply lorentz boost s.t. sum of incoming four-momentum equals zero
