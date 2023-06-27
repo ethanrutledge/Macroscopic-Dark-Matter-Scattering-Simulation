@@ -137,8 +137,7 @@ for j in range(100):
     direction = urm.TVector3(exits[cur].x - entries[cur].x, exits[cur].y - entries[cur].y, exits[cur].z - entries[cur].z)
     velocity = s * direction
 
-    # -----------------------------------------SCATTERING--------------------------------------
-    # -------------------------CROSS SECTION-----------------------------------
+    # -----------------------------------------INTERACTION--------------------------------------
     # radiative capture cross-section
     R_phi = 10  # ------------------placeholder value
 
@@ -146,58 +145,64 @@ for j in range(100):
     # units of this will need to be changed to SI as it is currently in Gev (or change previous units accordingly)
     cross_section = 60 * ((10 ** -3) / s) * (R_phi / 10 ** 5) ** (1 / 2)
 
-    # ---------------------------PART 1-----------------------------------------
-    # incoming beam particle and stationary target particle
-    # construct 4 vector momentum using known energy and momentum
+    # need to add check for probability of interaction not sure how this is done
+    # y = np.random.random()
+    # x = -(1/(n * cross_section)) * np.log(1 - y)
 
-    # target particle (stationary)
-    mass_target = 10  # ---------------------placeholder value (is this argon?)
-    target = urm.TLorentzVector(mass_target, 0, 0, 0)
+    if 1 == 1:  # ----------------placeholder until interaction section is finished
+        # --------------------------------------SCATTERING-------------------------------------
+        # ---------------------------PART 1-----------------------------------------
+        # incoming beam particle and stationary target particle
+        # construct 4 vector momentum using known energy and momentum
 
-    # beam particle (dark matter)
-    mass_DM = 10  # ------------------------placeholder value
-    gamma = urm.TVector3(1 / np.sqrt(1 - velocity.x ** 2), 1 / np.sqrt(1 - velocity.y ** 2), 1 / np.sqrt(1 - velocity.z ** 2))
-    p_beam = urm.TVector3(gamma.x * velocity.x, gamma.y * velocity.y, gamma.z * velocity.z)
-    p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
-    beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
+        # target particle (stationary)
+        mass_target = 10  # ---------------------placeholder value (is this argon?)
+        target = urm.TLorentzVector(mass_target, 0, 0, 0)
 
-    # ---------------------------PART 2---------------------------------------
-    # apply lorentz boost s.t. sum of incoming four-momentum equals zero
-    # this might need to be done using built in method for division of whole vector not sure yet
-    boost_factor = urm.TVector3(beam.x + target.x, beam.y + target.y, beam.z + target.z) / -(beam.E + target.E)
+        # beam particle (dark matter)
+        mass_DM = 10  # ------------------------placeholder value
+        gamma = urm.TVector3(1 / np.sqrt(1 - velocity.x ** 2), 1 / np.sqrt(1 - velocity.y ** 2), 1 / np.sqrt(1 - velocity.z ** 2))
+        p_beam = urm.TVector3(gamma.x * velocity.x, gamma.y * velocity.y, gamma.z * velocity.z)
+        p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
+        beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
 
-    target_boosted = target.boost(boost_factor)
-    beam_boosted = beam.boost(boost_factor)
+        # ---------------------------PART 2---------------------------------------
+        # apply lorentz boost s.t. sum of incoming four-momentum equals zero
+        # this might need to be done using built in method for division of whole vector not sure yet
+        boost_factor = urm.TVector3(beam.x + target.x, beam.y + target.y, beam.z + target.z) / -(beam.E + target.E)
 
-    # ---------------------------PART 3--------------------------------------
-    # solve for 4 momenta for outgoing particles
+        target_boosted = target.boost(boost_factor)
+        beam_boosted = beam.boost(boost_factor)
 
-    mass_out_1 = 10  # -------------------placeholder value
-    mass_out_2 = 10  # -------------------placeholder value
+        # ---------------------------PART 3--------------------------------------
+        # solve for 4 momenta for outgoing particles
 
-    # total energy of center of mass frame
-    E_cm = beam_boosted.E + target_boosted.E
+        mass_out_1 = 10  # -------------------placeholder value
+        mass_out_2 = 10  # -------------------placeholder value
 
-    # energy of outgoing particles
-    E_out_1 = (E_cm ** 2 + mass_out_1 ** 2 - mass_out_2 ** 2) / (2 * E_cm)
-    E_out_2 = (E_cm ** 2 + mass_out_2 ** 2 - mass_out_1 ** 2) / (2 * E_cm)
+        # total energy of center of mass frame
+        E_cm = beam_boosted.E + target_boosted.E
 
-    # solve for magnitudes of two momenta
-    p_1_abs = p_2_abs = np.sqrt(E_out_1 ** 2 - mass_out_1 ** 2)
+        # energy of outgoing particles
+        E_out_1 = (E_cm ** 2 + mass_out_1 ** 2 - mass_out_2 ** 2) / (2 * E_cm)
+        E_out_2 = (E_cm ** 2 + mass_out_2 ** 2 - mass_out_1 ** 2) / (2 * E_cm)
 
-    # sample c uniformly from -1 to 1
-    c_out = 2.0 * np.random.random() - 1.0
-    # sample phi(polar angle) uniformly from 0 to 2pi
-    phi_out = 2.0 * np.pi * np.random.random()
+        # solve for magnitudes of two momenta
+        p_1_abs = p_2_abs = np.sqrt(E_out_1 ** 2 - mass_out_1 ** 2)
 
-    # construct four-vector momenta in boosted frame
-    out_1_boosted = urm.TLorentzVector(E_out_1, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
-    out_2_boosted = urm.TLorentzVector(E_out_2, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
+        # sample c uniformly from -1 to 1
+        c_out = 2.0 * np.random.random() - 1.0
+        # sample phi(polar angle) uniformly from 0 to 2pi
+        phi_out = 2.0 * np.pi * np.random.random()
 
-    # ----------------------------------PART 4---------------------------------------
-    # boost back to lab frame
-    # using inverse boost parameter
-    inverse_boost_factor = -boost_factor
+        # construct four-vector momenta in boosted frame
+        out_1_boosted = urm.TLorentzVector(E_out_1, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
+        out_2_boosted = urm.TLorentzVector(E_out_2, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
 
-    out_1 = out_1_boosted.boost(inverse_boost_factor)
-    out_2 = out_2_boosted.boost(inverse_boost_factor)
+        # ----------------------------------PART 4---------------------------------------
+        # boost back to lab frame
+        # using inverse boost parameter
+        inverse_boost_factor = -boost_factor
+
+        out_1 = out_1_boosted.boost(inverse_boost_factor)
+        out_2 = out_2_boosted.boost(inverse_boost_factor)
