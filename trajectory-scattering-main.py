@@ -2,6 +2,7 @@
 
 import numpy as np
 import uproot_methods as urm
+import matplotlib.pyplot as plt
 
 # -------------------------DETECTOR GEOMETRY--------------------------------
 # based on dimensions of DUNE detector -- sourced from TDR doc
@@ -111,9 +112,13 @@ for j in range(100):
     if len(valid_points) == 2:
         # check which is entry and exit
         if valid_lambdas[0] < valid_lambdas[1]:
+            entry = valid_points[0]
+            exit = valid_points[1]
             entries.append(valid_points[0])
             exits.append(valid_points[1])
         else:
+            entry = valid_points[1]
+            exit = valid_points[0]
             entries.append(valid_points[1])
             exits.append(valid_points[0])
     elif len(valid_points) == 1 or len(valid_points) > 2:
@@ -129,80 +134,104 @@ for j in range(100):
     v_z = np.random.normal(0, v_bar/np.sqrt(3))
 
     # find magnitude of velocity
-    s = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
-    speeds.append(s)
+    speed = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
+    speeds.append(speed)
 
     # construct velocity vector from trajectory and speed
     cur = len(exits)
     direction = urm.TVector3(exits[cur].x - entries[cur].x, exits[cur].y - entries[cur].y, exits[cur].z - entries[cur].z)
-    velocity = s * direction
+    velocity = speed * direction
+    print(velocity)
 
     # -----------------------------------------INTERACTION--------------------------------------
     # radiative capture cross-section
-    R_phi = 10  # ------------------placeholder value
+    R_phi = 10 ** -25  # from figure 7 of nucleus capture paper
 
     # equation taken from eq32 of "nucleus capture by macroscopic dark matter" by bai and berger
-    # units of this will need to be changed to SI as it is currently in Gev (or change previous units accordingly)
-    cross_section = 60 * ((10 ** -3) / s) * (R_phi / 10 ** 5) ** (1 / 2)
+    # units of this will need to be changed to SI as it is currently in Gev
+    cross_section = 60 * ((10 ** -3) / speed) * (R_phi / 10 ** 5) ** (1 / 2)
 
-    # need to add check for probability of interaction not sure how this is done
-    # y = np.random.random()
-    # x = -(1/(n * cross_section)) * np.log(1 - y)
+    # number density of argon target particles
+    n = 10  # ------------placeholder
 
-    if 1 == 1:  # ----------------placeholder until interaction section is finished
-        # --------------------------------------SCATTERING-------------------------------------
-        # ---------------------------PART 1-----------------------------------------
-        # incoming beam particle and stationary target particle
-        # construct 4 vector momentum using known energy and momentum
+    # create a normalized trajectory vector
+    traj_vect = urm.TVector3(exit.x - entry.x, exit.y - entry.y, exit.z - entry.z)
+    traj_vect_norm = traj_vect / np.sqrt((traj_vect.x ** 2) + (traj_vect.y ** 2) + (traj_vect.z ** 2))
 
-        # target particle (stationary)
-        mass_target = 10  # ---------------------placeholder value (is this argon?)
-        target = urm.TLorentzVector(mass_target, 0, 0, 0)
+    # to track total sampled distance along trajectory
+    tot_dist = 0
+    # to track all the interaction points sampled
+    all_inter_pts = []
 
-        # beam particle (dark matter)
-        mass_DM = 10  # ------------------------placeholder value
-        gamma = urm.TVector3(1 / np.sqrt(1 - velocity.x ** 2), 1 / np.sqrt(1 - velocity.y ** 2), 1 / np.sqrt(1 - velocity.z ** 2))
-        p_beam = urm.TVector3(gamma.x * velocity.x, gamma.y * velocity.y, gamma.z * velocity.z)
-        p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
-        beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
+    # continue looping until reach break statement i.e. until sampled point leaves the detector
+    while 1:
+        # sample distance along trajectory until interaction
+        y = np.random.random()
+        dist = -(1/(n * cross_section)) * np.log(1 - y)
+        total_dist = tot_dist + dist
 
-        # ---------------------------PART 2---------------------------------------
-        # apply lorentz boost s.t. sum of incoming four-momentum equals zero
-        # this might need to be done using built in method for division of whole vector not sure yet
-        boost_factor = urm.TVector3(beam.x + target.x, beam.y + target.y, beam.z + target.z) / -(beam.E + target.E)
+        # find point along trajectory from sampled distance
+        inter_pt = entry + tot_dist * traj_vect_norm
+        all_inter_pts.append(inter_pt)
 
-        target_boosted = target.boost(boost_factor)
-        beam_boosted = beam.boost(boost_factor)
+        # if the interaction point is within the bounds of the detector
+        if (inter_pt.x <= x_max) & (inter_pt.x >= x_min) & (inter_pt.y <= y_max) & (inter_pt.y >= y_min) & (inter_pt.z <= z_max) & (inter_pt.z >= z_min):
+            # --------------------------------------SCATTERING-------------------------------------
+            # ---------------------------PART 1-----------------------------------------
+            # incoming beam particle and stationary target particle
+            # construct 4 vector momentum using known energy and momentum
 
-        # ---------------------------PART 3--------------------------------------
-        # solve for 4 momenta for outgoing particles
+            # target particle (stationary)
+            mass_target = 6.6335209 * (10 ** -26)    # in the case of DUNE this is argon
+            target = urm.TLorentzVector(mass_target, 0, 0, 0)
 
-        mass_out_1 = 10  # -------------------placeholder value
-        mass_out_2 = 10  # -------------------placeholder value
+            # beam particle (dark matter)
+            mass_DM = (10 ** 20.5) * (1.7826 * (10 ** -27))   # converted from Gev to kg
+            gamma = 1 / np.sqrt(1 - speed ** 2)
+            p_beam = gamma * velocity
+            p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
+            beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
 
-        # total energy of center of mass frame
-        E_cm = beam_boosted.E + target_boosted.E
+            # ---------------------------PART 2---------------------------------------
+            # apply lorentz boost s.t. sum of incoming four-momentum equals zero
+            boost_factor = urm.TVector3(beam.x + target.x, beam.y + target.y, beam.z + target.z) / -(beam.E + target.E)
 
-        # energy of outgoing particles
-        E_out_1 = (E_cm ** 2 + mass_out_1 ** 2 - mass_out_2 ** 2) / (2 * E_cm)
-        E_out_2 = (E_cm ** 2 + mass_out_2 ** 2 - mass_out_1 ** 2) / (2 * E_cm)
+            target_boosted = target.boost(boost_factor)
+            beam_boosted = beam.boost(boost_factor)
 
-        # solve for magnitudes of two momenta
-        p_1_abs = p_2_abs = np.sqrt(E_out_1 ** 2 - mass_out_1 ** 2)
+            # ---------------------------PART 3--------------------------------------
+            # solve for 4 momenta for outgoing particles
 
-        # sample c uniformly from -1 to 1
-        c_out = 2.0 * np.random.random() - 1.0
-        # sample phi(polar angle) uniformly from 0 to 2pi
-        phi_out = 2.0 * np.pi * np.random.random()
+            mass_out_photon = 0     # i suspect this may actually be argon not a photon as that should come from decay not scattering
+            mass_out_DM = mass_DM   # this has potential to be slightly shifted but will be considered negligible for now
 
-        # construct four-vector momenta in boosted frame
-        out_1_boosted = urm.TLorentzVector(E_out_1, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
-        out_2_boosted = urm.TLorentzVector(E_out_2, p_1_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_1_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_1_abs * c_out)
+            # total energy of center of mass frame
+            E_cm = beam_boosted.E + target_boosted.E
 
-        # ----------------------------------PART 4---------------------------------------
-        # boost back to lab frame
-        # using inverse boost parameter
-        inverse_boost_factor = -boost_factor
+            # energy of outgoing particles
+            E_out_photon = (E_cm ** 2 + mass_out_photon ** 2 - mass_out_DM ** 2) / (2 * E_cm)
+            E_out_DM = (E_cm ** 2 + mass_out_DM ** 2 - mass_out_photon ** 2) / (2 * E_cm)
 
-        out_1 = out_1_boosted.boost(inverse_boost_factor)
-        out_2 = out_2_boosted.boost(inverse_boost_factor)
+            # solve for magnitudes of two momenta
+            p_photon_abs = p_DM_abs = np.sqrt(E_out_photon ** 2 - mass_out_photon ** 2)
+
+            # sample c uniformly from -1 to 1
+            # could potentially be impacted by differential cross-section but will reassess this later on
+            c_out = 2.0 * np.random.random() - 1.0
+            # sample phi(polar angle) uniformly from 0 to 2pi
+            phi_out = 2.0 * np.pi * np.random.random()
+
+            # construct four-vector momenta in boosted frame
+            out_photon_boosted = urm.TLorentzVector(E_out_photon, p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), p_photon_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), p_photon_abs * c_out)
+            out_DM_boosted = urm.TLorentzVector(E_out_DM, -p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out), -p_photon_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out), -p_photon_abs * c_out)
+
+            # ----------------------------------PART 4---------------------------------------
+            # boost back to lab frame using inverse boost parameter
+            inverse_boost_factor = -boost_factor
+
+            out_photon = out_photon_boosted.boost(inverse_boost_factor)
+            out_DM = out_DM_boosted.boost(inverse_boost_factor)
+        else:
+            break   # if the sampled point is not in the detector break the loop
+
+
