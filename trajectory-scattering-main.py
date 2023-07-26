@@ -126,7 +126,7 @@ for j in range(100):
 
     # ----------------------SAMPLE SPEED------------------------------------
     # v_bar most likely needs refined
-    v_bar = 10 ** -3
+    v_bar = np.c * (10 ** -3)
 
     # each component sampled from a normal distribution with mean 0 and standard deviation v_bar/sqrt(3)
     v_x = np.random.normal(0, v_bar/np.sqrt(3))
@@ -137,26 +137,29 @@ for j in range(100):
     speed = np.sqrt((v_x ** 2) + (v_y ** 2) + (v_z ** 2))
     speeds.append(speed)
 
-    # construct velocity vector from trajectory and speed
-    cur = len(exits)
-    direction = urm.TVector3(exits[cur].x - entries[cur].x, exits[cur].y - entries[cur].y, exits[cur].z - entries[cur].z)
-    velocity = speed * direction
-    print(velocity)
-
-    # -----------------------------------------INTERACTION--------------------------------------
-    # radiative capture cross-section
-    R_phi = 10 ** -25  # from figure 7 of nucleus capture paper
-
-    # equation taken from eq32 of "nucleus capture by macroscopic dark matter" by bai and berger
-    # units of this will need to be changed to SI as it is currently in Gev
-    cross_section = 60 * ((10 ** -3) / speed) * (R_phi / 10 ** 5) ** (1 / 2)
-
-    # number density of argon target particles
-    n = 10  # ------------placeholder
-
     # create a normalized trajectory vector
     traj_vect = urm.TVector3(exit.x - entry.x, exit.y - entry.y, exit.z - entry.z)
     traj_vect_norm = traj_vect / np.sqrt((traj_vect.x ** 2) + (traj_vect.y ** 2) + (traj_vect.z ** 2))
+
+    # construct velocity vector from trajectory and speed
+    cur = len(exits)
+    velocity = speed * traj_vect_norm
+
+    # -----------------------------------------INTERACTION--------------------------------------
+    # cross-section taken from figure 7 of DM nucleus capture paper
+    cross_section = 10 ** -25
+
+    # radiative capture radius
+    # derived from eq 32 of DM nucleus capture paper
+    r_phi = (((cross_section * speed)/(60 * (10 ** -3))) ** 2) * (10 ** 5)
+
+    # calculation of number density
+    # molar mass of target -- in case of DUNE this is liquid argon
+    molar_mass_target = 39.948  # g/mol
+    # mass density of target -- in case of DUNE this is liquid argon
+    mass_density_target = 1.3982    # g/L (at boiling point)
+    # number density of target
+    number_density_target = (np.Avogadro * mass_density_target) / molar_mass_target
 
     # to track total sampled distance along trajectory
     tot_dist = 0
@@ -167,8 +170,8 @@ for j in range(100):
     while 1:
         # sample distance along trajectory until interaction
         y = np.random.random()
-        dist = -(1/(n * cross_section)) * np.log(1 - y)
-        total_dist = tot_dist + dist
+        dist = -(1/(number_density_target * cross_section)) * np.log(1 - y)
+        tot_dist = tot_dist + dist
 
         # find point along trajectory from sampled distance
         inter_pt = entry + tot_dist * traj_vect_norm
@@ -202,8 +205,13 @@ for j in range(100):
             # ---------------------------PART 3--------------------------------------
             # solve for 4 momenta for outgoing particles
 
-            mass_out_photon = 0     # i suspect this may actually be argon not a photon as that should come from decay not scattering
-            mass_out_DM = mass_DM   # this has potential to be slightly shifted but will be considered negligible for now
+            # the binding energy coming from the argon/DM bound state
+            # this is currently approximated to be 1/r_phi but may need adjusted later on
+            E_binding_bound_state = 1 / r_phi
+
+            # masses of outgoing particles
+            mass_out_photon = 0
+            mass_out_DM = mass_DM + mass_target - E_binding_bound_state
 
             # total energy of center of mass frame
             E_cm = beam_boosted.E + target_boosted.E
