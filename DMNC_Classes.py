@@ -1,4 +1,4 @@
-# framework for reframing previously completed code into generic classes and functions
+# Generic Classes Nucleus capture by Macroscopic DM, stores outgoing photon 4-momenta
 import numpy as np
 import uproot_methods as urm
 
@@ -24,17 +24,19 @@ class Detector:
 
 
 class Model:
-    def __init__(self, molar_mass_target, mass_density_target, mass_target):
+    def __init__(self, molar_mass_target, mass_density_target, mass_target, detector):
         self.molar_mass_target = molar_mass_target
         self.mass_density_target = mass_density_target
         self.mass_target = mass_target
-
-    # currently using the dimensions for dune
-    detector = Detector(12, 14, 58.2)
+        self.detector = detector
 
     def cross_section(self):
         # cross-section currently taken from figure 7 of DM nucleus capture paper
         return 10 ** -25
+
+    def decay_rate(self):
+        # simply a random placeholder value until the actual function is determined
+        return 5
 
     def trajectory_velocity(self):
         # ---------------------SAMPLE TRAJECTORIES-----------------------------------
@@ -150,9 +152,9 @@ class Model:
 
     def scattering_interaction(self):
         entry, exit, speed, velocity, traj_vect_norm = self.trajectory_velocity()
-        # -----------------------------------------INTERACTION--------------------------------------
         cross_section = self.cross_section()
-
+        decay_rate = self.decay_rate()
+        # -----------------------------------------INTERACTION--------------------------------------
         # radiative capture radius
         # derived from eq 32 of DM nucleus capture paper
         r_phi = (((cross_section * speed) / (60 * (10 ** -3))) ** 2) * (10 ** 5)
@@ -164,6 +166,10 @@ class Model:
         tot_dist = 0
         # to track all the interaction points sampled
         all_inter_pts = []
+
+        # to store all photons emitted from scattering and decay respectively
+        scattered_photons = []
+        decay_photons = []
 
         # continue looping until reach break statement i.e. until sampled point leaves the detector
         while 1:
@@ -243,8 +249,52 @@ class Model:
                 inverse_boost_factor = -boost_factor
 
                 out_photon = out_photon_boosted.boost(inverse_boost_factor)
+                scattered_photons.append(out_photon)
                 out_DM = out_DM_boosted.boost(inverse_boost_factor)
+
+                # ---------------------------------DECAY-------------------------------------------
+                # --------------INCOMPLETE SECTION STILL IN PROGRESS-------------------------------
+                current_state_E = out_DM.E
+                ground_state_E = target.E
+
+                curr_decay_photons = []
+
+                while 1:
+                    if current_state_E > ground_state_E:
+                        # decay time
+                        tr = np.random.random()
+                        decay_time = (-1 / decay_rate) * np.log(1 - tr)
+
+                        # boost to rest frame of decay
+                        decay_boost_factor = -urm.TVector3(out_DM.x, out_DM.y, out_DM.z)/out_DM.E
+                        boosted_decay = out_DM.boost(decay_boost_factor)
+
+                        # assuming there is no spin there is no preferred direction so c and phi can be sampled uniformly
+                        # sample c uniformly from -1 to 1
+                        c_decay = 2.0 * np.random.random() - 1.0
+                        # sample phi(polar angle) uniformly from 0 to 2pi
+                        phi_decay = 2.0 * np.pi * np.random.random()
+                    else:
+                        break
+                decay_photons.append(curr_decay_photons)
             else:
                 break  # if the sampled point is not in the detector break the loop
 
+        return scattered_photons, decay_photons
 
+
+class Simulation:
+    def __init__(self, model, iterations):
+        self.model = model
+        self.iterations = iterations
+
+    def run(self):
+        scattered_photons_all = []
+        decay_photons_all = []
+
+        for n in range(self.iterations):
+            scattered_photons, decay_photons = self.model.scattering_interaction()
+            scattered_photons_all.append(scattered_photons)
+            decay_photons_all.append(decay_photons)
+
+        return scattered_photons_all, decay_photons_all
