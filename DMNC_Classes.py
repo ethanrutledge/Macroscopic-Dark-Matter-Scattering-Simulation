@@ -1,6 +1,7 @@
 # Generic Classes Nucleus capture by Macroscopic DM, stores outgoing photon 4-momenta
 import numpy as np
 import uproot_methods as urm
+import pyhepmc as hm
 
 
 class Detector:
@@ -116,6 +117,7 @@ class Model:
         if len(valid_points) == 2:
             # check which is entry and exit
             if valid_lambdas[0] < valid_lambdas[1]:
+                # write to entry and exit variables and respective arrays
                 entry = valid_points[0]
                 exit = valid_points[1]
                 entries.append(valid_points[0])
@@ -126,7 +128,9 @@ class Model:
                 entries.append(valid_points[1])
                 exits.append(valid_points[0])
         elif len(valid_points) == 1 or len(valid_points) > 2:
+            # if there is only 1 or more than 2 entry/exit points print an error message and exit function
             print('invalid number of trajectory entry/exit points')
+            return
 
         # ----------------------SAMPLE SPEED------------------------------------
         # v_bar most likely needs refined
@@ -151,9 +155,12 @@ class Model:
         return entry, exit, speed, velocity, traj_vect_norm
 
     def scattering_interaction(self):
+        # pull the needed properties of the trajectory and velocity from method trajectory_velocity
         entry, exit, speed, velocity, traj_vect_norm = self.trajectory_velocity()
+        # pull the cross-section and decay rate from respective methods
         cross_section = self.cross_section()
         decay_rate = self.decay_rate()
+
         # -----------------------------------------INTERACTION--------------------------------------
         # radiative capture radius
         # derived from eq 32 of DM nucleus capture paper
@@ -168,8 +175,8 @@ class Model:
         all_inter_pts = []
 
         # to store all photons emitted from scattering and decay respectively
-        scattered_photons = []
-        decay_photons = []
+        scattered_photons = np.array([])
+        decay_photons = np.array([])
 
         # continue looping until reach break statement i.e. until sampled point leaves the detector
         while 1:
@@ -196,17 +203,17 @@ class Model:
                 # beam particle (dark matter)
                 mass_DM = (10 ** 20.5) * (1.7826 * (10 ** -27))  # converted from Gev to kg
                 gamma = 1 / np.sqrt(1 - speed ** 2)
-                p_beam = gamma * velocity
-                p_mag_beam = np.sqrt((p_beam.x ** 2) + (p_beam.y ** 2) + (p_beam.z ** 2))
-                beam = urm.TLorentzVector(np.sqrt((p_mag_beam ** 2) + mass_DM ** 2), p_beam.x, p_beam.y, p_beam.z)
+                p_DM_in = gamma * velocity
+                p_mag_DM_in = np.sqrt((p_DM_in.x ** 2) + (p_DM_in.y ** 2) + (p_DM_in.z ** 2))
+                DM_in = urm.TLorentzVector(np.sqrt((p_mag_DM_in ** 2) + mass_DM ** 2), p_DM_in.x, p_DM_in.y, p_DM_in.z)
 
                 # ---------------------------PART 2---------------------------------------
                 # apply lorentz boost s.t. sum of incoming four-momentum equals zero
-                boost_factor = urm.TVector3(beam.x + target.x, beam.y + target.y, beam.z + target.z) / -(
-                            beam.E + target.E)
+                boost_factor = urm.TVector3(DM_in.x + target.x, DM_in.y + target.y, DM_in.z + target.z) / -(
+                            DM_in.E + target.E)
 
                 target_boosted = target.boost(boost_factor)
-                beam_boosted = beam.boost(boost_factor)
+                beam_boosted = DM_in.boost(boost_factor)
 
                 # ---------------------------PART 3--------------------------------------
                 # solve for 4 momenta for outgoing particles
@@ -247,17 +254,30 @@ class Model:
                 # ----------------------------------PART 4---------------------------------------
                 # boost back to lab frame using inverse boost parameter
                 inverse_boost_factor = -boost_factor
-
                 out_photon = out_photon_boosted.boost(inverse_boost_factor)
-                scattered_photons.append(out_photon)
                 out_DM = out_DM_boosted.boost(inverse_boost_factor)
+
+                # create vertex with scattered photon and add to new scattering event
+                event_scatter = hm.GenEvent()
+                vertex_scatter = hm.GenVertex()
+                scattered_photon = hm.GenParticle()
+                scattered_photon.set_pdg_id(22)
+                scattered_photon.set_momentum(out_photon)
+                vertex_scatter.set_position(inter_pt)   # this needs a time element but not sure where comes from
+                vertex_scatter.add_particle_out(hm.FourVector(out_photon.E, out_photon.x, out_photon.y, out_photon.z))
+                event_scatter.add_vertex(vertex_scatter)
+
+                # append the scattered photon event to array of all scattered photons along current trajectory
+                np.append(scattered_photons, event_scatter)
 
                 # ---------------------------------DECAY-------------------------------------------
                 # --------------INCOMPLETE SECTION STILL IN PROGRESS-------------------------------
+                # temporarily used values NEED REVISED
                 current_state_E = out_DM.E
                 ground_state_E = target.E
 
-                curr_decay_photons = []
+                # create decay event
+                event_decay = hm.GenEvent()
 
                 while 1:
                     if current_state_E > ground_state_E:
@@ -265,18 +285,36 @@ class Model:
                         tr = np.random.random()
                         decay_time = (-1 / decay_rate) * np.log(1 - tr)
 
-                        # boost to rest frame of decay
-                        decay_boost_factor = -urm.TVector3(out_DM.x, out_DM.y, out_DM.z)/out_DM.E
-                        boosted_decay = out_DM.boost(decay_boost_factor)
+                        # create vertex at current time and interation point
+                        vertex_decay = hm.GenVertex()
+                        # -------------------------------------THE TIME HERE IS NOT CORRECT NEEDS TO BE TOTAL TIME
+                        vertex_decay.set_position(hm.FourVector(decay_time, inter_pt.x, inter_pt.y, inter_pt.z))
 
                         # assuming there is no spin there is no preferred direction so c and phi can be sampled uniformly
                         # sample c uniformly from -1 to 1
                         c_decay = 2.0 * np.random.random() - 1.0
                         # sample phi(polar angle) uniformly from 0 to 2pi
                         phi_decay = 2.0 * np.pi * np.random.random()
+
+                        # calculate momentum magnitude and energy of decay particle
+                        # it is assumed for now that the emitted photon has energy of 1 / r-phi
+                        E_decay_photon = 1 / r_phi
+                        p_decay_photon = np.sqrt(E_decay_photon ** 2 - mass_out_photon ** 2)
+
+                        # generate decay particle
+                        decay_photon = hm.GenParticle()
+                        decay_photon.set_pdg_id(22)
+                        decay_photon.set_momentum(hm.FourVector(E_decay_photon, p_decay_photon * np.sqrt(1 - c_decay ** 2)
+                                                                * np.cos(phi_decay), p_decay_photon * np.sqrt(1 - c_decay ** 2)
+                                                                * np.sin(phi_decay), p_decay_photon * c_decay))
+
+                        # add current decay to the decay event
+                        vertex_decay.add_particle_out(decay_photon)
+                        event_decay.add_vertex(vertex_decay)
                     else:
                         break
-                decay_photons.append(curr_decay_photons)
+                # add decay event to array of all decays along trajectory
+                np.append(decay_photons, event_decay)
             else:
                 break  # if the sampled point is not in the detector break the loop
 
@@ -285,16 +323,42 @@ class Model:
 
 class Simulation:
     def __init__(self, model, iterations):
+        self.decay_photons = None
+        self.scattered_photons = None
         self.model = model
         self.iterations = iterations
 
     def run(self):
-        scattered_photons_all = []
-        decay_photons_all = []
+        # arrays to store all photons from all trajectories
+        scattered_photons_all = np.array([])
+        decay_photons_all = np.array([])
 
+        # iterates the scattering_interation method of the model for given number of trajectory attempts
         for n in range(self.iterations):
+            # stores photons from specific trajectory
             scattered_photons, decay_photons = self.model.scattering_interaction()
-            scattered_photons_all.append(scattered_photons)
-            decay_photons_all.append(decay_photons)
+            np.append(scattered_photons_all, scattered_photons)
+            np.append(decay_photons_all, decay_photons)
 
-        return scattered_photons_all, decay_photons_all
+        # stores filled array of photons emitted as property of the class
+        self.scattered_photons = scattered_photons_all
+        self.decay_photons = decay_photons_all
+
+    def write(self, emission_type):
+        # creates file to store events to
+        writer = hm.WriterAscii('photons_emitted.HepMC3')
+
+        # checks which emission type file is and pulls photon array respectively
+        if emission_type == 'scattered':
+            photons = self.scattered_photons
+        elif emission_type == 'decay':
+            photons = self.decay_photons
+        else:
+            print('incorrect emission type')
+            return
+
+        # iterates through all trajectories and all events writing each to the writer
+        for i in range(len(photons)):
+            this_traj = photons[i]
+            for j in range(len(this_traj)):
+                writer.write_event(this_traj[j])
