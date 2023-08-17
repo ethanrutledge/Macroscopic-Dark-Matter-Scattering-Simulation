@@ -71,11 +71,11 @@ def NB(n,l):
     return 1.0/np.sqrt(normint)
 # boundary conditions for scattering state
 def bcs(Ns,delta,l):
-    return (4.0*np.pi*(np.cos(delta) * spherical_jn(l,k*R) + np.sin(delta) * spherical_yn(l,k*R)) - Ns * spherical_jn(l,kapS*R),
-            4.0*np.pi*(np.cos(delta) * k * spherical_jnp(l,k*R) + np.sin(delta) * k * spherical_ynp(l,k*R)) - Ns * kapS * spherical_jnp(l,kapS*R))
+    return ((np.cos(delta) * spherical_jn(l,k*R) + np.sin(delta) * spherical_yn(l,k*R)) - Ns * spherical_jn(l,kapS*R),
+            (np.cos(delta) * k * spherical_jnp(l,k*R) + np.sin(delta) * k * spherical_ynp(l,k*R)) - Ns * kapS * spherical_jnp(l,kapS*R))
 # solve boundary conditions to get interior normalization, dimensionless
 def NS(l):
-    return 1j**l * fsolve(lambda x : bcs(x[0],x[1],l),(1.0,0.3))[0]
+    return 4.0*np.pi*1j**l * fsolve(lambda x : bcs(x[0],x[1],l),(1.0,0.3))[0]
 
 # interior wave function profiles for scattering and bound states, dimensionless
 def RS(r,l):
@@ -87,15 +87,37 @@ def RB(r,n,l):
 # INTEGRALS
 ################################################################################
 
-# radial intergral in dipole approximation
-# dimension GeV^-1
+# radial intergral for decay in dipole approximation
+# dimension GeV^-4
+# cache the results to save time
+rad_int_B_cache = {}
 def rad_int_B(ni,li,nf,lf):
     if abs(li-lf) != 1:
         raise ValueError('Calculating amplitude for unallowed transition')
-    res = quad(lambda r : RB(r,ni,li)*RB(r,nf,lf)*r**3,0,R)
-    if res[1] > 0.01*abs(res[0]):
-        print('Error on radial integral greater than 1%')
-    return res[0]
+    try:
+        res = rad_int_B_cache[(ni,li,nf,lf)]
+    except KeyError:
+        rad_int_full = quad(lambda r : RB(r,ni,li) * RB(r,nf,lf) * r**3,0,R)
+        if rad_int_full[1] > 0.01*abs(rad_int_full[0]):
+            print('Error on radial integral greater than 1%')
+        res = rad_int_full[0]
+        rad_int_B_cache[(ni,li,nf,lf)] = res
+    return res
+# radial intergral for scattering in dipole approximation
+# dimension GeV^-4
+rad_int_S_cache = {}
+def rad_int_S(li,nf,lf):
+    if abs(li-lf) != 1:
+        raise ValueError('Calculating amplitude for unallowed transition')
+    try:
+        res = rad_int_S_cache[(li,nf,lf)]
+    except KeyError:
+        rad_int_full = quad(lambda r : RS(r,li)*RB(r,nf,lf)*r**3,0,R)
+        if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
+            print('Error on radial integral greater than 1%')
+        res = rad_int_full[0]
+        rad_int_S_cache[(li,nf,lf)] = res
+    return res
 # angular intergral for allowed dipole transitions
 # dimensionless
 def ang_int(ctq,eps,li,mi,lf,mf):
@@ -137,6 +159,19 @@ def ang_int2_tot(li,mi,lf,mf):
 # dimesionless
 def amp_B(ctq,eps,ni,li,mi,nf,lf,mf):
     return Z * e * q(ni,li,nf,lf) * NB(ni,li) * NB(nf,lf) * rad_int(ni,li,nf,lf) * ang_int(ctq,eps,li,mi,lf,mf)
+
+# amplitude for scattering
+# in GeV^-3/2
+def amp_S(ctq,eps,nf,lf,mf):
+    res = 0.
+    for li in [lf-1,lf+1]:
+        if li < 0 or k*R < li:
+            continue
+        if k*R < li:
+            continue
+        for mi in range(-li,li+1):
+            res += Z * e * (EB(nf,lf) + k**2/(2.0 * mu)) * NS(li) * NB(nf,lf) * rad_int_S(li,nf,lf) * ang_int(ctq,eps,li,mi,lf,mf)
+    return res
 
 ################################################################################
 # MAIN DECAY FUNCTIONS
@@ -190,4 +225,46 @@ def Gamma_tot_B(n,l,m):
                 continue
             rate = Gamma_B(n,l,m,nf,lf,mf)
             res.append([nf,lf,mf,rate])
+    return res
+
+################################################################################
+# MAIN SCATTERING FUNCTIONS
+################################################################################
+
+# Main scattering functions
+# scattering rate differential in cos(theta) for the photon (ctq) relative to spin z axis, GeV^-2
+def dxsec_v_S(ctq,eps,nf,lf,mf):
+    return EB(nf,lf) * abs(amp_S(ctq,eps,nf,lf,mf))**2 / (4.0 * np.pi)
+# total cross section to given final state in GeV^-2
+rad_int_cache = {}
+def xsec_v_S(nf,lf,mf):
+    res_list = [quad(lambda ctq : dxsec_v_S(ctq,eps,nf,lf,mf),-1.0,1.0) for eps in [-1,1]]
+    for res in res_list:
+        if res[1] > 0.01 * abs(res[0]):
+            print('Error on angular integral > 1%')
+    res =  sum([r[0] for r in res_list])
+    return res
+# allowed final states for scattering
+def allowed_fs_S():
+    res = []
+    for level in levels:
+        nf = level[0]
+        lf = level[1]
+        # First condition: dipole approximation is valid
+        # Second approximation: accessible dipole scattering channel for unsuppressed
+        # scattering wavefunction angular momentum mode
+        if level[2]*R > np.pi or k*R < lf-1:
+            continue
+        res.append([nf,lf])
+    return res
+# cross section to all allowed states in GeV^-2
+def xsec_v_tot_S():
+    res = []
+    for level in allowed_fs_S():
+        nf = level[0]
+        lf = level[1]
+        print('Working on ',level[0],level[1])
+        for mf in range(-lf,lf+1):
+            xsec_v = xsec_v_S(nf,lf,mf)
+            res.append([nf,lf,mf,xsec_v])
     return res
