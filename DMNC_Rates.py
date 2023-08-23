@@ -11,6 +11,8 @@ from scipy.integrate import quad
 from scipy.optimize import fsolve
 # scipy can't do real order bessel function zeroes, so use mpmath
 from mpmath import besseljzero
+# binomial coefficients that appear in spherical harmonics products
+from scipy.special import comb
 
 # Derivatives of spherical bessel functions
 def spherical_jnp(l,x):
@@ -32,6 +34,7 @@ mu = A * 0.938                         # nucleus (reduced) mass, GeV
 V0 = A * 0.246                         # potential depth, GeV
 k = 1.0e-3 * mu                        # incoming DM momentum, GeV
 R = 10.0                               # DM radius, GeV^-1
+levels = {}                            # cache for energy levels
 
 ################################################################################
 # STATES
@@ -44,26 +47,27 @@ def kapB(n,l):
     return spherical_jnz(l,n) / R
 # (positive) binding energy for state, GeV
 def EB(n,l):
-    return V0 - 0.5 * kapB(n,l)**2 / mu
+    try:
+        return levels[(n,l)]
+    except KeyError:
+        res = V0 - 0.5 * kapB(n,l)**2 / mu
+        if res > 0.:
+            levels[(n,l)] = res
+        return res
 # emitted photon energy/momentum, GeV
 def q(ni,li,nf,lf):
     if - EB(ni,li) + EB(nf,lf) <= 0.:
         raise ValueError('Attempting transition from lower energy state to higher energy state')
     return - EB(ni,li) + EB(nf,lf)
 
-# calculate all allowed energy levels, GeV
-# this might be very slow for large radii--any way to speed up?
-# high order Bessel are very slow
-levels = []
-ncur = 1
-lcur = 0
-while EB(ncur,lcur) > 0.0:
-    while EB(ncur,lcur) > 0.0:
-        levels.append([ncur,lcur,EB(ncur,lcur)])
-        lcur = lcur + 1
-    lcur = 0
-    ncur = ncur + 1
-levels = sorted(levels,key = lambda x : x[2])
+# Maximum n allowed to have bound states below top of potential
+def nmax(l,Emin):
+    res = int(np.ceil((np.sqrt(2.0*mu*V0)*R)/np.pi - 0.5 * l))
+    while EB(res,l) < Emin:
+        res -= 1
+    while EB(res+1,l) > Emin:
+        res += 1
+    return res
 
 # normalization for bound state, GeV^-3/2
 def NB(n,l):
@@ -90,87 +94,96 @@ def RB(r,n,l):
 # radial intergral for decay in dipole approximation
 # dimension GeV^-4
 # cache the results to save time
+# added approximate result at large kappa R
 rad_int_B_cache = {}
-def rad_int_B(ni,li,nf,lf):
+def rad_int_B(ni,li,nf,lf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
     if abs(li-lf) != 1:
         raise ValueError('Calculating amplitude for unallowed transition')
     try:
         res = rad_int_B_cache[(ni,li,nf,lf)]
     except KeyError:
-        rad_int_full = quad(lambda r : RB(r,ni,li) * RB(r,nf,lf) * r**3,0,R)
-        if rad_int_full[1] > 0.01*abs(rad_int_full[0]):
-            print('Error on radial integral greater than 1%')
-        res = rad_int_full[0]
+        subinterval_lim = max(50,int(np.ceil(max(kapS*R,kapB(nf,lf)*R)/subinterval_periods)))
+        if kapB(ni,li)*R < approx_threshold or kapB(nf,lf)*R < approx_threshold or force_full:
+            rad_int_full = quad(lambda r : RB(r,ni,li)*RB(r,nf,lf)*r**3,0,R,limit=subinterval_lim)
+            if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
+                print('Error on radial integral greater than 1%')
+            res = rad_int_full[0]
+        else:
+            kap1 = kapB(ni,li)
+            kap2 = kapB(nf,lf)
+            kap_sum = kap1 + kap2
+            kap_dif = kap2 - kap1
+            kap_sum_R = kap_sum*R
+            kap_dif_R = kap_dif*R
+            res =  kap_dif**2 * (-1)**((1+lf+li)/2) * (kap_sum_R*np.cos(kap_sum_R) - np.sin(kap_sum_R))
+            res += kap_sum**2 * (-1)**((1+lf-li)/2) * (kap_dif_R*np.cos(kap_dif_R) - np.sin(kap_dif_R))
+            res /= 2.0 * kap1 * kap2 * kap_sum**2 * kap_dif**2
         rad_int_B_cache[(ni,li,nf,lf)] = res
     return res
 # radial intergral for scattering in dipole approximation
 # dimension GeV^-4
 rad_int_S_cache = {}
-def rad_int_S(li,nf,lf):
+def rad_int_S(li,nf,lf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
     if abs(li-lf) != 1:
         raise ValueError('Calculating amplitude for unallowed transition')
     try:
         res = rad_int_S_cache[(li,nf,lf)]
     except KeyError:
-        rad_int_full = quad(lambda r : RS(r,li)*RB(r,nf,lf)*r**3,0,R)
-        if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
-            print('Error on radial integral greater than 1%')
-        res = rad_int_full[0]
+        subinterval_lim = max(50,int(np.ceil(max(kapS*R,kapB(nf,lf)*R)/subinterval_periods)))
+        if kapS*R < approx_threshold or kapB(nf,lf)*R < approx_threshold or force_full:
+            rad_int_full = quad(lambda r : RS(r,li)*RB(r,nf,lf)*r**3,0,R,limit=subinterval_lim)
+            if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
+                print('Error on radial integral greater than 1%')
+            res = rad_int_full[0]
+        else:
+            kapB_cur = kapB(nf,lf)
+            kap_sum = kapB_cur + kapS
+            kap_dif = kapB_cur - kapS
+            kap_sum_R = kap_sum*R
+            kap_dif_R = kap_dif*R
+            res =  kap_dif**2 * (-1)**((1+lf+li)/2) * (kap_sum_R*np.cos(kap_sum_R) - np.sin(kap_sum_R))
+            res += kap_sum**2 * (-1)**((1+lf-li)/2) * (kap_dif_R*np.cos(kap_dif_R) - np.sin(kap_dif_R))
+            res /= 2.0 * kapB_cur * kapS * kap_sum**2 * kap_dif**2
         rad_int_S_cache[(li,nf,lf)] = res
     return res
-# angular intergral for allowed dipole transitions
-# dimensionless
-def ang_int(ctq,eps,li,mi,lf,mf):
-    if lf == li - 1 and mf == mi - 1:
-        return 0.5 * (eps - ctq) * np.sqrt((li+mi) * (li+mi-1)/(8.0 * li**2 - 2.0))
-    elif lf == li - 1 and mf == mi:
-        return - np.sqrt((1.0-ctq**2) * (li**2 - mi**2) / (8.0 * li**2 -2.0))
-    elif lf == li - 1 and mf == mi + 1:
-        return 0.5 * (ctq + eps) * np.sqrt((li-mi) * (li-mi-1)/(8.0 * li**2 - 2.0))
-    elif lf == li + 1 and mf == mi - 1:
-        return - 0.5 * (eps - ctq) * np.sqrt((li-mi+1) * (li-mi+2)/(8.0 * li**2 + 16.0 * li + 6.0))
-    elif lf == li + 1 and mf == mi:
-        return - np.sqrt((1.0-ctq**2) * (li-mi+1) * (li+mi+1)/(8.0 * li**2 + 16.0 * li + 6.0))
-    elif lf == li + 1 and mf == mi + 1:
-        return - 0.5 * (ctq + eps) * np.sqrt((li+mi+1) * (li+mi+2)/(8.0 * li**2 + 16.0 * li + 6.0))
-    else:
-        return 0.0
 
-# angular integral of squared amplitude over photon direction
-# dimensionless
-# note: independent of photon polarization
-def ang_int2_tot(li,mi,lf,mf):
-    if lf == li - 1 and mf == mi - 1:
-        return (-1. + li + mi)*(li + mi)/(-3. + 12.*li**2)
-    elif lf == li - 1 and mf == mi:
-        return (2.*(li - 1.*mi)*(li + mi))/(-3. + 12.*li**2)
-    elif lf == li - 1 and mf == mi + 1:
-        return ((-1. + li - 1.*mi)*(li - 1.*mi))/(-3. + 12.*li**2)
-    elif lf == li + 1 and mf == mi - 1:
-        return ((1. + li - 1.*mi)*(2. + li - 1.*mi))/(9. + 12.*li*(2. + li))
-    elif lf == li + 1 and mf == mi:
-        return (2.*(1. + li - 1.*mi)*(1. + li + mi))/(9. + 12.*li*(2. + li))
-    elif lf == li + 1 and mf == mi + 1:
-        return ((1. + li + mi)*(2. + li + mi))/(9. + 12.*li*(2. + li))
-    else:
+# Triple product of spherical harmonics, integrated
+# This combination appears in the angular integrals
+def sph_prod(li,mi,mr,lf,mf):
+    if abs(li-lf) != 1 or mi+mr != mf:
         return 0.0
+    coef = np.sqrt(3.0/(4.0 * np.pi * (2*lf+1)))
+    clres = 0.
+    if lf == li + 1:
+        clres = np.sqrt(comb(li+1-mi-mr,1-mr)*comb(li+1+mi+mr,1+mr))
+    elif lf == li - 1:
+        clres = np.sqrt(comb(li+mi,1-mr)*comb(li-mi,1+mr))
+    else:
+        raise ValueError('Unphysical spherical harmonic product')
+    return coef * clres
+
+# Angular integral assembled for all three components
+def ang_int(li,mi,lf,mf):
+    if abs(li-lf) != 1 or abs(mi-mf) > 1:
+        return 0.0
+    sph_x = sph_prod(li,mi,-1,lf,mf)-sph_prod(li,mi,1,lf,mf)
+    sph_y = 1j*(sph_prod(li,mi,-1,lf,mf)-sph_prod(li,mi,1,lf,mf))
+    sph_z = np.sqrt(2.0) * sph_prod(li,mi,0,lf,mf)
+    return np.sqrt(2.0*np.pi/3.0) * np.array([sph_x,sph_y,sph_z])
 
 # amplitude
 # dimesionless
-def amp_B(ctq,eps,ni,li,mi,nf,lf,mf):
-    return Z * e * q(ni,li,nf,lf) * NB(ni,li) * NB(nf,lf) * rad_int(ni,li,nf,lf) * ang_int(ctq,eps,li,mi,lf,mf)
+def amp_B(ni,li,mi,nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    return Z * e * q(ni,li,nf,lf) * NB(ni,li) * NB(nf,lf) * rad_int_B(ni,li,nf,lf,force_full,subinterval_periods,approx_threshold) * ang_int(li,mi,lf,mf)
 
 # amplitude for scattering
 # in GeV^-3/2
-def amp_S(ctq,eps,nf,lf,mf):
+def amp_S(nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
     res = 0.
     for li in [lf-1,lf+1]:
         if li < 0 or k*R < li:
             continue
-        if k*R < li:
-            continue
-        for mi in range(-li,li+1):
-            res += Z * e * (EB(nf,lf) + k**2/(2.0 * mu)) * NS(li) * NB(nf,lf) * rad_int_S(li,nf,lf) * ang_int(ctq,eps,li,mi,lf,mf)
+        res += Z * e * (EB(nf,lf) + k**2/(2.0 * mu)) * NS(li) * NB(nf,lf) * np.sqrt((2.0*li+1)/(4.0*np.pi)) * rad_int_S(li,nf,lf,force_full,subinterval_periods,approx_threshold) * ang_int(li,0,lf,mf)
     return res
 
 ################################################################################
@@ -181,50 +194,37 @@ def amp_S(ctq,eps,nf,lf,mf):
 # eps: polarization of outgoing photon (+- 1 for right/left)
 # ni,li,mi: initial state quantum numbers
 # nf,lf,mf: final state quantum numbers
-def dGamma_B(ctq,eps,ni,li,mi,nf,lf,mf):
-    return q(ni,li,nf,lf) * abs(amp_B(ctq,eps,ni,li,mi,nf,lf,mf))**2 / (16.0 * np.pi)
+def dGamma_B(ctq,ni,li,mi,nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    stq = np.sqrt(1.0-ctq**2)
+    pol_mat = np.array([[ctq**2,0.,-ctq*stq],[0.,1.,0.],[-ctq*stq,0.,stq**2]])
+    amp = amp_B(ni,li,mi,nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+    return np.real(q(ni,li,nf,lf) * np.linalg.multi_dot([np.conjugate(amp),pol_mat,amp]) / (16.0 * np.pi))
 
 # total decay rate in GeV
 # Independent of polarization (emerges as phase)
 # ni,li,mi: initial state quantum numbers
 # nf,lf,mf: final state quantum numbers
-def Gamma_B(ni,li,mi,nf,lf,mf):
-    return q(ni,li,nf,lf) * abs(Z * e * q(ni,li,nf,lf) * NB(ni,li) * NB(nf,lf) *  rad_int_B(ni,li,nf,lf))**2 * ang_int2_tot(li,mi,lf,mf) / (8.0 * np.pi)
-
-# allowed final states for decay of state n,l,m
-def allowed_fs(n,l,m):
-    res = []
-    for level in levels:
-        nf = level[0]
-        lf = level[1]
-        # Only one unit of angular momentum change in dipole approx.
-        if abs(lf - l) != 1:
-            continue
-        # Must go to lower energy state
-        if - EB(n,l) + EB(nf,lf) <= 0:
-            continue
-        # Dipole approximation must be valid
-        if q(n,l,nf,lf)*R > np.pi:
-            continue
-        res.append([nf,lf])
-    return res
+def Gamma_B(ni,li,mi,nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    pol_mat = np.array([[2.0/3,0.,0.],[0.,2.0,0.],[0.,0.,4.0/3.]])
+    amp = amp_B(ni,li,mi,nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+    return np.real(q(ni,li,nf,lf) * np.linalg.multi_dot([np.conjugate(amp),pol_mat,amp]) / (16.0 * np.pi)) # decay rate to all allowed states in GeV
 
 # decay rate to all allowed states in GeV
 # n,l,m: quantum numbers of decaying state
 # Returns: all allowed n,l,m final states with their respective decay rate
-def Gamma_tot_B(n,l,m):
-    res = []
-    for level in allowed_fs(n,l,m):
-        #print('Working on ',level[0],level[1])
-        nf = level[0]
-        lf = level[1]
-        # Can only be m-1,m,m+1
-        for mf in range(m-1,m+1):
-            # For the m's: they must be in the correct range
-            if mf > lf or mf < -lf:
-                continue
-            rate = Gamma_B(n,l,m,nf,lf,mf)
-            res.append([nf,lf,mf,rate])
+def Gamma_tot_B(n,l,m,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    res = {}
+    for lf in [l-1,l+1]:
+        if lf < 0:
+            continue
+        nf = nmax(lf,EB(n,l))
+        while nf > 0 and q(n,l,nf,lf)*R < np.pi:
+            for mf in range(m-1,m+1):
+                if mf > lf or mf < -lf:
+                    continue
+                rate = Gamma_B(n,l,m,nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+                res[(nf,lf,mf)] = rate
+            nf -= 1
     return res
 
 ################################################################################
@@ -233,38 +233,26 @@ def Gamma_tot_B(n,l,m):
 
 # Main scattering functions
 # scattering rate differential in cos(theta) for the photon (ctq) relative to spin z axis, GeV^-2
-def dxsec_v_S(ctq,eps,nf,lf,mf):
-    return EB(nf,lf) * abs(amp_S(ctq,eps,nf,lf,mf))**2 / (4.0 * np.pi)
+def dxsec_v_S(ctq,nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    stq = np.sqrt(1.0-ctq**2)
+    pol_mat = np.array([[ctq**2,0.,-ctq*stq],[0.,1.,0.],[-ctq*stq,0.,stq**2]])
+    amp = amp_S(nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+    return np.real(EB(nf,lf) * np.linalg.multi_dot([np.conjugate(amp),pol_mat,amp]) / (4.0 * np.pi))
+
 # total cross section to given final state in GeV^-2
-rad_int_cache = {}
-def xsec_v_S(nf,lf,mf):
-    res_list = [quad(lambda ctq : dxsec_v_S(ctq,eps,nf,lf,mf),-1.0,1.0) for eps in [-1,1]]
-    for res in res_list:
-        if res[1] > 0.01 * abs(res[0]):
-            print('Error on angular integral > 1%')
-    res =  sum([r[0] for r in res_list])
-    return res
-# allowed final states for scattering
-def allowed_fs_S():
-    res = []
-    for level in levels:
-        nf = level[0]
-        lf = level[1]
-        # First condition: dipole approximation is valid
-        # Second approximation: accessible dipole scattering channel for unsuppressed
-        # scattering wavefunction angular momentum mode
-        if level[2]*R > np.pi or k*R < lf-1:
-            continue
-        res.append([nf,lf])
-    return res
+def xsec_v_S(nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
+    pol_mat = np.array([[2.0/3,0.,0.],[0.,2.0,0.],[0.,0.,4.0/3.]])
+    amp = amp_S(nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+    return np.real(EB(nf,lf) * np.linalg.multi_dot([np.conjugate(amp),pol_mat,amp]) / (4.0 * np.pi))
+
 # cross section to all allowed states in GeV^-2
-def xsec_v_tot_S():
-    res = []
-    for level in allowed_fs_S():
-        nf = level[0]
-        lf = level[1]
-        print('Working on ',level[0],level[1])
-        for mf in range(-lf,lf+1):
-            xsec_v = xsec_v_S(nf,lf,mf)
-            res.append([nf,lf,mf,xsec_v])
+def xsec_v_tot_S(force_full = False, subinterval_periods = 8.0, approx_threshold = 10.0):
+    res = {}
+    for lf in range(int(np.ceil(k*R)) + 1):
+        nf = nmax(lf,0.)
+        for mf in range(-1,2):
+            if mf < -lf or mf > lf:
+                continue
+            xsec_v = xsec_v_S(nf,lf,mf,force_full,subinterval_periods,approx_threshold)
+            res[(nf,lf,mf)] = xsec_v
     return res
