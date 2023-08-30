@@ -179,7 +179,7 @@ def amp_B(ni,li,mi,nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_
 # amplitude for scattering
 # in GeV^-3/2
 def amp_S(nf,lf,mf,force_full = False,subinterval_periods = 8.0,approx_threshold = 10.0):
-    res = 0.
+    res = np.array([0.,0.,0.],dtype='complex128')
     for li in [lf-1,lf+1]:
         if li < 0 or k*R < li:
             continue
