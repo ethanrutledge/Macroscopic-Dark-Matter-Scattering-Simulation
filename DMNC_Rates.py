@@ -63,9 +63,9 @@ def q(ni,li,nf,lf):
 # Maximum n allowed to have bound states below top of potential
 def nmax(l,Emin):
     res = int(np.ceil((np.sqrt(2.0*mu*V0)*R)/np.pi - 0.5 * l))
-    while EB(res,l) < Emin:
+    while res > 0 and EB(res,l) < Emin:
         res -= 1
-    while EB(res+1,l) > Emin:
+    while res + 1 > 0 and EB(res+1,l) > Emin:
         res += 1
     return res
 
