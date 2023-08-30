@@ -2,6 +2,7 @@
 import numpy as np
 import uproot_methods as urm
 import pyhepmc as hm
+import DMNC_Rates as rates
 
 
 class Detector:
@@ -25,49 +26,14 @@ class Detector:
 
 
 class Model:
-    def __init__(self, molar_mass_target, mass_density_target, mass_target, atomic_charge, detector):
-        self.molar_mass_target = molar_mass_target
-        self.mass_density_target = mass_density_target
-        self.mass_target = mass_target
-        self.atomic_charge = atomic_charge
+    def __init__(self, molar_mass, mass_density, mass_number, atomic_number, detector):
+        atomic_mass_proton = 1.007276466812  # amu
+        atomic_mass_neutron = 1.00866491588  # amu
+        self.molar_mass_target = molar_mass
+        self.mass_density_target = mass_density
+        self.mass_number_target = mass_number
+        self.atomic_number_target = atomic_number
         self.detector = detector
-
-    n_counter = 0
-
-    def cross_section(self):
-        # cross-section currently taken from figure 7 of DM nucleus capture paper
-        return 10 ** -25
-
-    def decay_rate(self, r_phi, v_0):
-        mass = self.mass_target
-        z = self.atomic_charge
-        n = self.principal_quantum_num(r_phi, v_0)
-
-        if n > 0:
-            gamma = (z ** 2) * (1 / 137) * (np.pi ** 3) * n / (4 * (mass ** 3) * (r_phi ** 4))
-        else:
-            gamma = 0
-
-        return gamma
-
-    def principal_quantum_num(self, r_phi, v_0):
-        mass = self.mass_target
-
-        n_max = (r_phi / np.pi) * np.sqrt(2 * mass * v_0)
-        n_max = np.floor(n_max)
-        n_max = 100
-
-        if self.n_counter == 0:
-            n = n_max
-            self.n_counter = self.n_counter + 1
-        elif self.n_counter == n_max:
-            n = 0
-            self.n_counter = 0
-        else:
-            n = n_max - self.n_counter
-            self.n_counter = self.n_counter + 1
-
-        return n
 
     def trajectory_velocity(self):
         # ---------------------SAMPLE TRAJECTORIES-----------------------------------
@@ -159,8 +125,8 @@ class Model:
                 exits.append(valid_points[0])
 
             # ----------------------SAMPLE SPEED------------------------------------
-            # v_bar most likely needs refined
-            v_bar = (2.997 * (10 ** 8)) * (10 ** -3)
+            # currently approximated as such, may need to be adjusted later on
+            v_bar = (10 ** -3)
 
             # each component sampled from a normal distribution with mean 0 and standard deviation v_bar/sqrt(3)
             v_x = np.random.normal(0, v_bar / np.sqrt(3))
@@ -175,7 +141,6 @@ class Model:
             traj_vect_norm = traj_vect / np.sqrt((traj_vect.x ** 2) + (traj_vect.y ** 2) + (traj_vect.z ** 2))
 
             # construct velocity vector from trajectory and speed
-            cur = len(exits)
             velocity = speed * traj_vect_norm
 
             return entry, exit, speed, velocity, traj_vect_norm
@@ -185,14 +150,15 @@ class Model:
 
         elif len(valid_points) == 1 or len(valid_points) > 2:
             # if there is only 1 or more than 2 entry/exit points print an error message and exit function
-            print('invalid number of trajectory entry/exit points')
+            raise ValueError('invalid number of trajectory entry/exit points')
             return
 
     def scattering_interaction(self):
         # pull the needed properties of the trajectory and velocity from method trajectory_velocity
         entry, exit, speed, velocity, traj_vect_norm = self.trajectory_velocity()
-        # pull the cross-section and decay rate from respective methods
-        cross_section = self.cross_section()
+
+        # pull the cross-section from DMNC_Rates appropriately
+        cross_section = rates.xsec_v_tot_S()
 
         # -----------------------------------------INTERACTION--------------------------------------
         # create event to store current trajectory in
@@ -200,6 +166,7 @@ class Model:
 
         # radiative capture radius
         # derived from eq 32 of DM nucleus capture paper
+        #### doesnt work with new cross section rates code
         r_phi = (((cross_section * speed) / (60 * (10 ** -3))) ** 2) * (10 ** 5)
 
         # calculation of number density
@@ -217,6 +184,7 @@ class Model:
         while 1:
             # sample distance along trajectory until interaction
             y = np.random.random()
+            ############# doesnt work with new cross section maybe need to know nlm final states
             dist = -(1 / (number_density_target * cross_section)) * np.log(1 - y)
             tot_dist = tot_dist + dist
 
@@ -237,20 +205,20 @@ class Model:
                 # construct 4 vector momentum using known energy and momentum
 
                 # target particle (stationary)
-                mass_target = self.mass_target
-                target = urm.TLorentzVector(mass_target, 0, 0, 0)
+                mass_target = self.molar_mass_target    # amu
+                mass_target = mass_target * 0.9315      # convert to Gev
+                target = urm.TLorentzVector(0, 0, 0, mass_target)
 
                 # beam particle (dark matter)
-                mass_DM = (10 ** 20.5) * (1.7826 * (10 ** -27))  # converted from Gev to kg
-                gamma = 1 / np.sqrt(1 - (speed ** 2) / ((2.997 * (10 ** 8)) ** 2))
+                mass_DM = (10 ** 20.5)      # Gev
+                gamma = 1 / np.sqrt(1 - (speed ** 2))
                 p_DM_in = gamma * velocity
                 p_mag_DM_in = np.sqrt((p_DM_in.x ** 2) + (p_DM_in.y ** 2) + (p_DM_in.z ** 2))
-                DM_in = urm.TLorentzVector(np.sqrt((p_mag_DM_in ** 2) + mass_DM ** 2), p_DM_in.x, p_DM_in.y, p_DM_in.z)
+                DM_in = urm.TLorentzVector(p_DM_in.x, p_DM_in.y, p_DM_in.z, np.sqrt((p_mag_DM_in ** 2) + mass_DM ** 2))
 
                 # ---------------------------PART 2---------------------------------------
                 # apply lorentz boost s.t. sum of incoming four-momentum equals zero
-                #boost_factor = -urm.TVector3(DM_in.x + target.x, DM_in.y + target.y, DM_in.z + target.z) / (DM_in.E + target.E)
-                boost_factor = urm.TVector3(0.2, 0.2, 0.2)
+                boost_factor = -urm.TVector3(DM_in.x + target.x, DM_in.y + target.y, DM_in.z + target.z) / (DM_in.E + target.E)
 
                 target_boosted = target.boost(boost_factor)
                 beam_boosted = DM_in.boost(boost_factor)
@@ -259,8 +227,9 @@ class Model:
                 # solve for 4 momenta for outgoing particles
 
                 # the binding energy coming from the argon/DM bound state
-                # this is currently approximated to be 1/r_phi but may need adjusted later on
-                E_binding_bound_state = 1 / r_phi
+                # this is currently approximated but may need adjusted later on
+                # updated to greater precision
+                E_binding_bound_state = self.mass_number_target * 0.246   # GeV
 
                 # masses of outgoing particles
                 mass_out_photon = 0
@@ -283,13 +252,12 @@ class Model:
                 phi_out = 2.0 * np.pi * np.random.random()
 
                 # construct four-vector momenta in boosted frame
-                out_photon_boosted = urm.TLorentzVector(E_out_photon,
-                                                        p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out),
+                out_photon_boosted = urm.TLorentzVector(p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out),
                                                         p_photon_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out),
-                                                        p_photon_abs * c_out)
-                out_DM_boosted = urm.TLorentzVector(E_out_DM, -p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out),
+                                                        p_photon_abs * c_out, E_out_photon)
+                out_DM_boosted = urm.TLorentzVector(-p_photon_abs * np.sqrt(1 - c_out ** 2) * np.cos(phi_out),
                                                     -p_photon_abs * np.sqrt(1 - c_out ** 2) * np.sin(phi_out),
-                                                    -p_photon_abs * c_out)
+                                                    -p_photon_abs * c_out, E_out_DM)
 
                 # ----------------------------------PART 4---------------------------------------
                 # boost back to lab frame using inverse boost parameter
@@ -306,8 +274,10 @@ class Model:
                 traj_event.add_vertex(vertex_scatter)
 
                 # ---------------------------------DECAY-------------------------------------------
-                decay_rate = self.decay_rate(r_phi, E_binding_bound_state)
+                ########## dont understand how to know the nlm state to input here
+                decay_rate = rates.Gamma_tot_B()
 
+                ############ this while loop parameter need adjusted for new decay functions
                 while decay_rate > 0:
                     # decay time
                     tr = np.random.random()
@@ -325,7 +295,7 @@ class Model:
 
                     # calculate momentum magnitude and energy of decay particle
                     # it is assumed for now that the emitted photon has energy of 1 / r-phi
-                    E_decay_photon = 1 / r_phi
+                    E_decay_photon = E_binding_bound_state
                     p_decay_photon = np.sqrt(E_decay_photon ** 2 - mass_out_photon ** 2)
 
                     # generate decay particle
@@ -337,8 +307,8 @@ class Model:
                     vertex_decay.add_particle_out(decay_photon)
                     traj_event.add_vertex(vertex_decay)
 
-                    # find decay rate for next decay
-                    decay_rate = self.decay_rate(r_phi, E_binding_bound_state)
+                    ####### current setup requires way to iterate to next decay rate
+
             else:
                 break  # if the sampled point is not in the detector break the loop
 
