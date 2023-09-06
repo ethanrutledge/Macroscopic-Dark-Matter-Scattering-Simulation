@@ -1,3 +1,4 @@
+import numpy.random
 import uproot_methods as urm
 import pyhepmc as hm
 import DMNC_Rates as rates
@@ -16,12 +17,12 @@ from scipy.special import comb
 
 class Model:
     def __init__(self, scale, atomic_number, mass_number, molar_mass, mass_density, R_phi = 10.0, mass_DM = 10 ** 25):
-        self.x_max = scale(0) / 2                                                               # max x dimension of detector, m
-        self.x_min = -scale(0) / 2                                                              # min x dimension of detector, m
-        self.y_max = scale(1) / 2                                                               # max y dimension of detector, m
-        self.y_min = -scale(1) / 2                                                              # min y dimension of detector, m
-        self.z_max = scale(2) / 2                                                               # max z dimension of detector, m
-        self.z_min = -scale(2) / 2                                                              # min z dimension of detector, m
+        self.x_max = scale[0] / 2                                                               # max x dimension of detector, m
+        self.x_min = -scale[0] / 2                                                              # min x dimension of detector, m
+        self.y_max = scale[1] / 2                                                               # max y dimension of detector, m
+        self.y_min = -scale[1] / 2                                                              # min y dimension of detector, m
+        self.z_max = scale[2] / 2                                                               # max z dimension of detector, m
+        self.z_min = -scale[2] / 2                                                              # min z dimension of detector, m
 
         self.molar_mass_target = molar_mass                                                     # material molar mass
         self.mass_density_target = mass_density                                                 # material mass density
@@ -58,11 +59,16 @@ class DynamicDarkMatter:
         self.speed = None
         self.traj_vect_norm = None
 
+        self.curr_xsec = None
+        self.curr_nlm = None
+        self.curr_DM = None
+
         self.tot_dist = 0
         self.all_inter_pts = []
         self.curr_time = 0
 
-        self.cross_section_total = rates.xsec_v_tot_S()
+        self.trajectory()
+        self.scattering()
 
     def trajectory(self):
         """
@@ -139,7 +145,7 @@ class DynamicDarkMatter:
         :return: inter_pt if within bounds of detector, 0 if not within bounds of detector
         """
         y = np.random.random()
-        dist = -(1 / (self.model.number_density_target * self.cross_section_total)) * np.log(1 - y)
+        dist = -(1 / (self.model.number_density_target * self.cross_section())) * np.log(1 - y)
         self.tot_dist = self.tot_dist + dist
 
         inter_pt = self.entry + self.tot_dist * self.traj_vect_norm
@@ -190,15 +196,19 @@ class DynamicDarkMatter:
             inverse_boost_factor = -boost_factor
             out_photon = out_photon_boosted.boost(inverse_boost_factor)
             out_DM = out_DM_boosted.boost(inverse_boost_factor)
+            self.curr_DM = out_DM
 
             vertex_scatter = hm.GenVertex(hm.FourVector(self.curr_time, inter_pt.x, inter_pt.y, inter_pt.z))
             scattered_photon = hm.GenParticle(hm.FourVector(out_photon.E, out_photon.x, out_photon.y, out_photon.z), 22)
             vertex_scatter.add_particle_out(scattered_photon)
             self.event.add_vertex(vertex_scatter)
 
+            self.decay(inter_pt)
+
     def decay(self, inter_pt):
-        decay_rate = rates.Gamma_tot_B()
-        while decay_rate > 0:
+        decay_rate = self.gamma(self.curr_nlm)
+
+        while decay_rate != 0:
             tr = np.random.random()
             decay_time = (-1 / decay_rate) * np.log(1 - tr)
             self.curr_time = self.curr_time + decay_time
@@ -216,6 +226,41 @@ class DynamicDarkMatter:
             vertex_decay.add_particle_out(decay_photon)
             self.event.add_vertex(vertex_decay)
 
+            decay_rate = self.gamma(self.curr_nlm)
+
+    def gamma(self, nlm):
+        decay_rate = rates.Gamma_tot_B(nlm[0], nlm[1], nlm[2])
+        if len(decay_rate) == 0:
+            return 0
+        else:
+            values_gamma = list(decay_rate.values())
+            total_gamma = sum(values_gamma)
+            prob_gamma = values_gamma / total_gamma
+
+            curr_gamma = np.random.choice(values_gamma, p=prob_gamma)
+            for key, value in decay_rate.items():
+                if value == curr_gamma:
+                    self.curr_nlm = key
+                    break
+
+            return curr_gamma
+
+    def cross_section(self):
+        all_xsec = rates.xsec_v_tot_S()
+        values_xsec = list(all_xsec.values())
+        total_xsec = sum(values_xsec)
+        prob_xsec = values_xsec / total_xsec
+
+        curr_xsec = np.random.choice(values_xsec, p=prob_xsec)
+        self.curr_xsec = curr_xsec
+
+        for key, value in all_xsec.items():
+            if value == curr_xsec:
+                self.curr_nlm = key
+                break
+
+        return curr_xsec
+
     def Rates(self):
         # Derivatives of spherical bessel functions
         def spherical_jnp(l, x):
@@ -232,26 +277,34 @@ class DynamicDarkMatter:
         # PARAMETERS
         ################################################################################
 
-
-        k = 1.0e-3  # incoming DM momentum, GeV
+        Z = self.model.atomic_number_target  # material atomic number
+        A = self.model.mass_number_target  # material mass number
+        e = self.model.electric_charge  # electric charge, dimensionless
+        mu = self.model.mu  # nucleus (reduced) mass, GeV
+        V0 = self.model.V0  # potential depth, GeV
+        px = self.curr_DM.x
+        py = self.curr_DM.y
+        pz = self.curr_DM.z
+        k = np.sqrt((px ** 2) + (py ** 2) + (pz ** 2))  # incoming DM momentum, GeV
+        R = self.model.R_phi  # DM radius, GeV^-1
         levels = {}  # cache for energy levels
 
         ################################################################################
         # STATES
         ################################################################################
 
-        kapS = np.sqrt(k ** 2 + 2.0 * self.model.mu * self.model.V0)  # interior momentum for scattering, GeV
+        kapS = np.sqrt(k ** 2 + 2.0 * mu * V0)  # interior momentum for scattering, GeV
 
         # momentum inside potential well for bound state, GeV
         def kapB(n, l):
-            return spherical_jnz(l, n) / self.model.R_phi
+            return spherical_jnz(l, n) / R
 
         # (positive) binding energy for state, GeV
         def EB(n, l):
             try:
                 return levels[(n, l)]
             except KeyError:
-                res = self.model.V0 - 0.5 * kapB(n, l) ** 2 / self.model.mu
+                res = V0 - 0.5 * kapB(n, l) ** 2 / mu
                 if res > 0.:
                     levels[(n, l)] = res
                 return res
@@ -264,23 +317,23 @@ class DynamicDarkMatter:
 
         # Maximum n allowed to have bound states below top of potential
         def nmax(l, Emin):
-            res = int(np.ceil((np.sqrt(2.0 * self.model.mu * self.model.V0) * self.model.R_phi) / np.pi - 0.5 * l))
-            while EB(res, l) < Emin:
+            res = int(np.ceil((np.sqrt(2.0 * mu * V0) * R) / np.pi - 0.5 * l))
+            while res > 0 and EB(res, l) < Emin:
                 res -= 1
-            while EB(res + 1, l) > Emin:
+            while res + 1 > 0 and EB(res + 1, l) > Emin:
                 res += 1
             return res
 
         # normalization for bound state, GeV^-3/2
         def NB(n, l):
-            normint = -0.25 * (np.pi * self.model.R_phi ** 3 * jv(-0.5 + l, spherical_jnz(l, n)) * jv(1.5 + l, spherical_jnz(l,n))) / spherical_jnz(l, n)
+            normint = -0.25 * (np.pi * R ** 3 * jv(-0.5 + l, spherical_jnz(l, n)) * jv(1.5 + l, spherical_jnz(l,n))) / spherical_jnz(l, n)
             return 1.0 / np.sqrt(normint)
 
         # boundary conditions for scattering state
         def bcs(Ns, delta, l):
             return (
-            (np.cos(delta) * spherical_jn(l, k * self.model.R_phi) + np.sin(delta) * spherical_yn(l, k * self.model.R_phi)) - Ns * spherical_jn(l, kapS * self.model.R_phi),
-            (np.cos(delta) * k * spherical_jnp(l, k * self.model.R_phi) + np.sin(delta) * k * spherical_ynp(l, k * self.model.R_phi)) - Ns * kapS * spherical_jnp(l, kapS * self.model.R_phi))
+            (np.cos(delta) * spherical_jn(l, k * R) + np.sin(delta) * spherical_yn(l, k * R)) - Ns * spherical_jn(l,kapS * R),
+            (np.cos(delta) * k * spherical_jnp(l, k * R) + np.sin(delta) * k * spherical_ynp(l, k * R)) - Ns * kapS * spherical_jnp(l, kapS * R))
 
         # solve boundary conditions to get interior normalization, dimensionless
         def NS(l):
@@ -297,6 +350,25 @@ class DynamicDarkMatter:
         # INTEGRALS
         ################################################################################
 
+        # general radial integegral
+        def rad_int(Ri, kapi, li, Rf, kapf, lf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
+            if kapi * R < approx_threshold or kapf * R < approx_threshold or force_full:
+                print('Calculating full radial integral... may be slow')
+                subinterval_lim = max(50, int(np.ceil(max(kapi * R, kapf * R) / subinterval_periods)))
+                rad_int_full = quad(lambda r: Ri(r) * Rf(r) * r ** 3, 0, R, limit=subinterval_lim)
+                if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
+                    print('Error on radial integral greater than 1%')
+                res = rad_int_full[0]
+            else:
+                kap_sum = kapi + kapf
+                kap_dif = kapi - kapf
+                kap_sum_R = kap_sum * R
+                kap_dif_R = kap_dif * R
+                res = -kap_dif ** 2 * (-1) ** ((1 + lf + li) / 2) * (kap_sum_R * np.cos(kap_sum_R) - np.sin(kap_sum_R))
+                res += kap_sum ** 2 * (-1) ** ((1 + li - lf) / 2) * (kap_dif_R * np.cos(kap_dif_R) - np.sin(kap_dif_R))
+                res /= 2.0 * kapi * kapf * kap_sum ** 2 * kap_dif ** 2
+            return res
+
         # radial intergral for decay in dipole approximation
         # dimension GeV^-4
         # cache the results to save time
@@ -309,24 +381,8 @@ class DynamicDarkMatter:
             try:
                 res = rad_int_B_cache[(ni, li, nf, lf)]
             except KeyError:
-                subinterval_lim = max(50, int(np.ceil(max(kapS * self.model.R_phi, kapB(nf, lf) * self.model.R_phi) / subinterval_periods)))
-                if kapB(ni, li) * self.model.R_phi < approx_threshold or kapB(nf, lf) * self.model.R_phi < approx_threshold or force_full:
-                    rad_int_full = quad(lambda r: RB(r, ni, li) * RB(r, nf, lf) * r ** 3, 0, self.model.R_phi, limit=subinterval_lim)
-                    if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
-                        print('Error on radial integral greater than 1%')
-                    res = rad_int_full[0]
-                else:
-                    kap1 = kapB(ni, li)
-                    kap2 = kapB(nf, lf)
-                    kap_sum = kap1 + kap2
-                    kap_dif = kap2 - kap1
-                    kap_sum_R = kap_sum * self.model.R_phi
-                    kap_dif_R = kap_dif * self.model.R_phi
-                    res = kap_dif ** 2 * (-1) ** ((1 + lf + li) / 2) * (
-                                kap_sum_R * np.cos(kap_sum_R) - np.sin(kap_sum_R))
-                    res += kap_sum ** 2 * (-1) ** ((1 + lf - li) / 2) * (
-                                kap_dif_R * np.cos(kap_dif_R) - np.sin(kap_dif_R))
-                    res /= 2.0 * kap1 * kap2 * kap_sum ** 2 * kap_dif ** 2
+                res = rad_int(lambda r: RB(r, ni, li), kapB(ni, li), li, lambda r: RB(r, nf, lf), kapB(nf, lf), lf,
+                              force_full, subinterval_periods, approx_threshold)
                 rad_int_B_cache[(ni, li, nf, lf)] = res
             return res
 
@@ -340,23 +396,8 @@ class DynamicDarkMatter:
             try:
                 res = rad_int_S_cache[(li, nf, lf)]
             except KeyError:
-                subinterval_lim = max(50, int(np.ceil(max(kapS * self.model.R_phi, kapB(nf, lf) * self.model.R_phi) / subinterval_periods)))
-                if kapS * self.model.R_phi < approx_threshold or kapB(nf, lf) * self.model.R_phi < approx_threshold or force_full:
-                    rad_int_full = quad(lambda r: RS(r, li) * RB(r, nf, lf) * r ** 3, 0, self.model.R_phi, limit=subinterval_lim)
-                    if rad_int_full[1] > 0.01 * abs(rad_int_full[0]):
-                        print('Error on radial integral greater than 1%')
-                    res = rad_int_full[0]
-                else:
-                    kapB_cur = kapB(nf, lf)
-                    kap_sum = kapB_cur + kapS
-                    kap_dif = kapB_cur - kapS
-                    kap_sum_R = kap_sum * self.model.R_phi
-                    kap_dif_R = kap_dif * self.model.R_phi
-                    res = kap_dif ** 2 * (-1) ** ((1 + lf + li) / 2) * (
-                                kap_sum_R * np.cos(kap_sum_R) - np.sin(kap_sum_R))
-                    res += kap_sum ** 2 * (-1) ** ((1 + lf - li) / 2) * (
-                                kap_dif_R * np.cos(kap_dif_R) - np.sin(kap_dif_R))
-                    res /= 2.0 * kapB_cur * kapS * kap_sum ** 2 * kap_dif ** 2
+                res = rad_int(lambda r: RS(r, li), kapS, li, lambda r: RB(r, nf, lf), kapB(nf, lf), lf, force_full,
+                              subinterval_periods, approx_threshold)
                 rad_int_S_cache[(li, nf, lf)] = res
             return res
 
@@ -365,12 +406,12 @@ class DynamicDarkMatter:
         def sph_prod(li, mi, mr, lf, mf):
             if abs(li - lf) != 1 or mi + mr != mf:
                 return 0.0
-            coef = np.sqrt(3.0 / (4.0 * np.pi * (2 * lf + 1)))
+            coef = np.sqrt(3.0 / (4.0 * np.pi * (2 * lf + 1) * (2 * li + 1)))
             clres = 0.
             if lf == li + 1:
-                clres = np.sqrt(comb(li + 1 - mi - mr, 1 - mr) * comb(li + 1 + mi + mr, 1 + mr))
+                clres = np.sqrt(comb(lf - mf, li - mi) * comb(lf + mf, li + mi))
             elif lf == li - 1:
-                clres = np.sqrt(comb(li + mi, 1 - mr) * comb(li - mi, 1 + mr))
+                clres = (-1) ** mr * np.sqrt(comb(li - mi, lf - mf) * comb(li + mi, lf + mf))
             else:
                 raise ValueError('Unphysical spherical harmonic product')
             return coef * clres
@@ -380,50 +421,109 @@ class DynamicDarkMatter:
             if abs(li - lf) != 1 or abs(mi - mf) > 1:
                 return 0.0
             sph_x = sph_prod(li, mi, -1, lf, mf) - sph_prod(li, mi, 1, lf, mf)
-            sph_y = 1j * (sph_prod(li, mi, -1, lf, mf) - sph_prod(li, mi, 1, lf, mf))
+            sph_y = 1j * (sph_prod(li, mi, -1, lf, mf) + sph_prod(li, mi, 1, lf, mf))
             sph_z = np.sqrt(2.0) * sph_prod(li, mi, 0, lf, mf)
             return np.sqrt(2.0 * np.pi / 3.0) * np.array([sph_x, sph_y, sph_z])
 
         # amplitude
         # dimesionless
         def amp_B(ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
-            return self.model.atomic_number_target * self.model.electric_charge * q(ni, li, nf, lf) * NB(ni, li) * NB(nf, lf) * rad_int_B(ni, li, nf, lf, force_full, subinterval_periods, approx_threshold) * ang_int(li, mi, lf, mf)
+            return Z * e * q(ni, li, nf, lf) * NB(ni, li) * NB(nf, lf) * rad_int_B(ni, li, nf, lf, force_full,
+                                                                                   subinterval_periods,
+                                                                                   approx_threshold) * ang_int(li, mi,
+                                                                                                               lf, mf)
 
         # amplitude for scattering
         # in GeV^-3/2
         def amp_S(nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
             res = np.array([0., 0., 0.], dtype='complex128')
             for li in [lf - 1, lf + 1]:
-                if li < 0 or k * self.model.R_phi < li:
+                if li < 0 or k * R < li:
                     continue
-                res += self.model.atomic_number_target * self.model.electric_charge * (EB(nf, lf) + k ** 2 / (2.0 * self.model.mu)) * NS(li) * NB(nf, lf) * np.sqrt(
+                res += Z * e * (EB(nf, lf) + k ** 2 / (2.0 * mu)) * NS(li) * NB(nf, lf) * np.sqrt(
                     (2.0 * li + 1) / (4.0 * np.pi)) * rad_int_S(li, nf, lf, force_full, subinterval_periods,
                                                                 approx_threshold) * ang_int(li, 0, lf, mf)
             return res
+
+        def pol_tensor_full(ctq, phiq):
+            ctq2 = ctq ** 2
+            stq2 = 1.0 - ctq2
+            stq = np.sqrt(stq2)
+            cpq = np.cos(phiq)
+            cpq2 = cpq ** 2
+            spq2 = 1.0 - cpq2
+            spq = np.sqrt(spq2)
+            if phiq > np.pi:
+                spq = - spq
+            return np.array([[ctq2 * cpq2 + spq2, -stq2 * cpq * spq, -ctq * stq * cpq],
+                             [-stq2 * cpq * spq, cpq2 + ctq2 * spq2, -ctq * stq * spq],
+                             [-ctq * stq * cpq, -ctq * stq * spq, stq2]])
+
+        def pol_tensor_phi_int_part(ctq, phiq):
+            ctq2 = ctq ** 2
+            stq2 = 1.0 - ctq2
+            stq = np.sqrt(stq2)
+            cpq = np.cos(phiq)
+            cpq2 = cpq ** 2
+            spq2 = 1.0 - cpq2
+            spq = np.sqrt(spq2)
+            if phiq > np.pi:
+                spq = - spq
+            return np.array([[0.5 * (phiq * (1.0 + ctq2) - cpq * spq * stq2), -0.5 * stq2 * spq2, -ctq * stq * spq],
+                             [-0.5 * stq2 * spq2, 0.5 * (phiq * (1.0 + ctq2) + cpq * spq * stq2),
+                              -ctq * stq * (1.0 - cpq)],
+                             [-ctq * stq * spq, -ctq * stq * (1.0 - cpq), phiq * stq ** 2]])
+
+        def pol_tensor_ct_int_part(ctq, phiq):
+            ctq2 = ctq ** 2
+            stq2 = 1.0 - ctq2
+            stq = np.sqrt(stq2)
+            cpq = np.cos(phiq)
+            cpq2 = cpq ** 2
+            spq2 = 1.0 - cpq2
+            spq = np.sqrt(spq2)
+            if phiq > np.pi:
+                spq = - spq
+            return (np.pi / 3.0) * np.diag([4.0 + 3.0 * ctq + ctq ** 3, 4.0 + 3.0 * ctq + ctq ** 3, 2.0 * (2.0 - ctq) * (1.0 + ctq) ** 2])
+
+        def pol_tensor_phi_int(ctq):
+            ctq2 = ctq ** 2
+            stq2 = 1.0 - ctq2
+            return np.pi * np.diag([1.0 + ctq2, 1.0 + ctq2, 2.0 * stq2])
+
+        pol_tensor_int = 8.0 * np.pi / 3.0
 
         ################################################################################
         # MAIN DECAY FUNCTIONS
         ################################################################################
 
-        # decay rate differential in cos(theta) for the photon (ctq) relative to spin z axis, GeV
+        # decay rate differential in cos(theta) and phi of the photon (ctq,phiq) relative to spin z axis, GeV
         # eps: polarization of outgoing photon (+- 1 for right/left)
         # ni,li,mi: initial state quantum numbers
         # nf,lf,mf: final state quantum numbers
-        def dGamma_B(ctq, ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
-            stq = np.sqrt(1.0 - ctq ** 2)
-            pol_mat = np.array([[ctq ** 2, 0., -ctq * stq], [0., 1., 0.], [-ctq * stq, 0., stq ** 2]])
+        def dGamma_B_dphidct(ctq, phiq, ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0,approx_threshold=10.0):
             amp = amp_B(ni, li, mi, nf, lf, mf, force_full, subinterval_periods, approx_threshold)
-            return np.real(q(ni, li, nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_mat, amp]) / (16.0 * np.pi))
+            return np.real(
+                q(ni, li, nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_tensor_full(ctq, phiq), amp]) / (8.0 * np.pi ** 2))
+
+        # decay rate integrated in cos(theta) of the photon (ctq,phiq) relative to spin z axis, GeV
+        # eps: polarization of outgoing photon (+- 1 for right/left)
+        # ni,li,mi: initial state quantum numbers
+        # nf,lf,mf: final state quantum numbers
+        def dGamma_B_dct(ctq, ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
+            amp = amp_B(ni, li, mi, nf, lf, mf, force_full, subinterval_periods, approx_threshold)
+            return np.real(
+                q(ni, li, nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_tensor_phi_int(ctq), amp]) / (
+                            8.0 * np.pi ** 2))
 
         # total decay rate in GeV
         # Independent of polarization (emerges as phase)
         # ni,li,mi: initial state quantum numbers
         # nf,lf,mf: final state quantum numbers
         def Gamma_B(ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
-            pol_mat = np.array([[2.0 / 3, 0., 0.], [0., 2.0, 0.], [0., 0., 4.0 / 3.]])
             amp = amp_B(ni, li, mi, nf, lf, mf, force_full, subinterval_periods, approx_threshold)
-            return np.real(q(ni, li, nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_mat, amp]) / (
-                        16.0 * np.pi))  # decay rate to all allowed states in GeV
+            return np.real(q(ni, li, nf, lf) * pol_tensor_int * np.linalg.multi_dot([np.conjugate(amp), amp]) / (
+                        8.0 * np.pi ** 2))  # decay rate to all allowed states in GeV
 
         # decay rate to all allowed states in GeV
         # n,l,m: quantum numbers of decaying state
@@ -434,7 +534,7 @@ class DynamicDarkMatter:
                 if lf < 0:
                     continue
                 nf = nmax(lf, EB(n, l))
-                while nf > 0 and q(n, l, nf, lf) * self.model.R_phi < np.pi:
+                while nf > 0 and q(n, l, nf, lf) * R < np.pi:
                     for mf in range(m - 1, m + 1):
                         if mf > lf or mf < -lf:
                             continue
@@ -443,28 +543,34 @@ class DynamicDarkMatter:
                     nf -= 1
             return res
 
+        def pdf_phi_B(phiq, ctq, ni, li, mi, nf, lf, mf, force_full=False, subinterval_periods=8.0,approx_threshold=10.0):
+            amp = amp_B(ni, li, mi, nf, lf, mf, force_full, subinterval_periods, approx_threshold)
+
         ################################################################################
         # MAIN SCATTERING FUNCTIONS
         ################################################################################
 
-        # Main scattering functions
-        # scattering rate differential in cos(theta) for the photon (ctq) relative to spin z axis, GeV^-2
-        def dxsec_v_S(ctq, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
-            stq = np.sqrt(1.0 - ctq ** 2)
-            pol_mat = np.array([[ctq ** 2, 0., -ctq * stq], [0., 1., 0.], [-ctq * stq, 0., stq ** 2]])
+        # scattering rate differential in cos(theta),phi for the photon (ctq) relative to spin z axis, GeV^-2
+        def dxsec_v_S_dphidct(ctq, phiq, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
             amp = amp_S(nf, lf, mf, force_full, subinterval_periods, approx_threshold)
-            return np.real(EB(nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_mat, amp]) / (4.0 * np.pi))
+            return np.real(EB(nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_tensor_full(ctq, phiq), amp]) / (
+                        8.0 * np.pi ** 2))
+
+        # scattering rate differential in cos(theta),phi for the photon (ctq) relative to spin z axis, GeV^-2
+        def dxsec_v_S_dct(ctq, nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
+            amp = amp_S(nf, lf, mf, force_full, subinterval_periods, approx_threshold)
+            return np.real(EB(nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_tensor_phi_int(ctq), amp]) / (
+                        8.0 * np.pi ** 2))
 
         # total cross-section to given final state in GeV^-2
         def xsec_v_S(nf, lf, mf, force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
-            pol_mat = np.array([[2.0 / 3, 0., 0.], [0., 2.0, 0.], [0., 0., 4.0 / 3.]])
             amp = amp_S(nf, lf, mf, force_full, subinterval_periods, approx_threshold)
-            return np.real(EB(nf, lf) * np.linalg.multi_dot([np.conjugate(amp), pol_mat, amp]) / (4.0 * np.pi))
+            return np.real(EB(nf, lf) * pol_tensor_int * np.linalg.multi_dot([np.conjugate(amp), amp]) / (8.0 * np.pi ** 2))
 
         # cross-section to all allowed states in GeV^-2
         def xsec_v_tot_S(force_full=False, subinterval_periods=8.0, approx_threshold=10.0):
             res = {}
-            for lf in range(int(np.ceil(k * self.model.R_phi)) + 1):
+            for lf in range(int(np.ceil(k * R)) + 1):
                 nf = nmax(lf, 0.)
                 for mf in range(-1, 2):
                     if mf < -lf or mf > lf:
@@ -472,6 +578,20 @@ class DynamicDarkMatter:
                     xsec_v = xsec_v_S(nf, lf, mf, force_full, subinterval_periods, approx_threshold)
                     res[(nf, lf, mf)] = xsec_v
             return res
+
+        ################################################################################
+        # SAMPLE cos(theta)
+        ################################################################################
+
+        def sample_ctq(mi, mf):
+            y = np.random.random()
+            if mi == mf:
+                delta = np.exp(1j * np.pi / 3.0) * (-1.0 + 2.0 * y + 2.0 * 1j * np.sqrt((1.0 - y) * y)) ** (1.0 / 3.0)
+                return 1.0 / delta + delta
+            elif abs(mi - mf) == 1:
+                delta = (-2.0 + 4.0 * y + np.sqrt(5.0 - 16.0 * (1.0 - y) * y)) ** (1.0 / 3.0)
+                return -1.0 / delta + delta
+            raise ValueError('Transition not allowed')
 
 
 class Simulation:
@@ -486,11 +606,8 @@ class Simulation:
 
         # iterates the scattering_interation method of the model for given number of trajectory attempts
         for n in range(self.iterations):
-            # stores photons from specific trajectory
-            traj_event = self.model.scattering_interaction()
-            np.append(traj_events_all, traj_event)
+            np.append(traj_events_all, DynamicDarkMatter(self.model).event)
 
-        # stores filled array of photons emitted as property of the class
         self.traj_events = traj_events_all
 
     def write(self):
